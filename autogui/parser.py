@@ -18,8 +18,8 @@ def ParseCsv(path:str) -> dict:
             if len(row['图片坐标范围']) != 0:
                 region = row['图片坐标范围'].split(";")
                 value['pic_region'] = (int(region[0]),int(region[1]),int(region[2]),int(region[3]))
-            if len(row['置信度']) != 0:
-                value['confidence'] = float(row['置信度'])
+            if len(row['图片置信度']) != 0:
+                value['confidence'] = float(row['图片置信度'])
             if len(row['完成后等待时间']) != 0:
                 value['wait'] = float(row['完成后等待时间'])
             # 将键值对添加到字典中

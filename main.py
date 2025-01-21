@@ -3,7 +3,7 @@ import autogui
 import autogui.autoOperator
 
 LOOP = False
-CONFIG_PATH = "config"
+CONFIG_PATH = "config/test"
 
 parser = argparse.ArgumentParser(description="自动化操作")
 parser.add_argument("--path", type=str, help="运行配置路径", default=None)
