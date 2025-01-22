@@ -6,8 +6,8 @@ LOOP = False
 CONFIG_PATH = "config/test"
 
 parser = argparse.ArgumentParser(description="自动化操作")
-parser.add_argument("--path", type=str, help="运行配置路径", default=None)
-parser.add_argument("--loop", type=int, help="是否循环", default=None)
+parser.add_argument("-p", "--path", type=str, help="运行配置路径", default=None)
+parser.add_argument("-l", "--loop", action="store_true", help="是否循环")
 args = parser.parse_args()
 
 if args.path:

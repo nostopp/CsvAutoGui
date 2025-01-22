@@ -49,28 +49,59 @@ class AutoOperator:
 
     def Operate(self, operation:dict):
         try:
+            operateParam = None if not 'operate_param' in operation else operation['operate_param']
             match operation['operate']:
                 case 'click':
-                    if 'operate_param' in operation:
-                        pyautogui.click(button=operation['operate_params'])
+                    if operateParam:
+                        pyautogui.click(button=operateParam)
                     else:
                         pyautogui.click()                    
                 case 'mDown':
-                    if 'operate_param' in operation:
-                        pyautogui.mouseDown(button=operation['operate_params'])
+                    if operateParam:
+                        pyautogui.mouseDown(button=operateParam)
                     else:
                         pyautogui.mouseDown()                                        
                 case 'mUp':
-                    if operation['operate_param']:
-                        pyautogui.mouseUp(button=operation['operate_params'])
+                    if operateParam:
+                        pyautogui.mouseUp(button=operateParam)
                     else:
                         pyautogui.mouseUp()                                       
                 case 'mMove':
-                    if operation['operate_param']:
-                        offset = operation['operate_params'].split(";")
+                    if operateParam:
+                        offset = operateParam.split(";")
                         pyautogui.moveRel(xOffset=float(offset[0]), yOffset=float(offset[1]))
                     else:
-                        raise Exception(f"{operation['index']} 操作参数错误: {operation['operate_params']}")
+                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+                case 'mMoveTo':
+                    if operateParam:
+                        offset = operateParam.split(";")
+                        pyautogui.moveTo(xOffset=float(offset[0]), yOffset=float(offset[1]))
+                    else:
+                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+                case 'press':
+                    if operateParam:
+                        pyautogui.press(operateParam)
+                    else:
+                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+                case 'kDown':
+                    if operateParam:
+                        pyautogui.keyDown(operateParam)
+                    else:
+                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+                case 'kUp':
+                    if operateParam:
+                        pyautogui.keyUp(operateParam)
+                    else:
+                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+                case 'write':
+                    if operateParam:
+                        param = operateParam.split(";")
+                        if len(param) == 1:
+                            pyautogui.write(param[0])
+                        elif len(param) == 2:
+                            pyautogui.write(param[0], interval=float(param[1]))
+                    else:
+                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
 
         except Exception as e:
             raise e
