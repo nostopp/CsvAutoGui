@@ -2,23 +2,21 @@ import argparse
 import autogui
 import autogui.autoOperator
 
-LOOP = False
-CONFIG_PATH = "config/test"
-
 parser = argparse.ArgumentParser(description="自动化操作")
-parser.add_argument("-p", "--path", type=str, help="运行配置路径", default=None)
-parser.add_argument("-l", "--loop", action="store_true", help="是否循环")
+parser.add_argument("-p", "--path", type=str, help="运行配置路径", default="config/test")
+parser.add_argument("-l", "--loop", action="store_true", help="是否循环", default=False)
+parser.add_argument("--log", action="store_true", help="是否打印日志", default=False)
 args = parser.parse_args()
 
-if args.path:
-    CONFIG_PATH = args.path
-if args.loop:
-    LOOP = True if args.loop != 0 else False
-print(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}")
+CONFIG_PATH = args.path
+LOOP = args.loop
+PRINT_LOG = args.log
+print(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}")
 
-dataDict = autogui.parser.ParseCsv(CONFIG_PATH)
-operator = autogui.AutoOperator(dataDict, CONFIG_PATH, LOOP)
+if __name__ == "__main__":
+    dataDict = autogui.parser.ParseCsv(CONFIG_PATH)
+    operator = autogui.AutoOperator(dataDict, CONFIG_PATH, LOOP, PRINT_LOG)
 
-while True:
-    if not operator.Update():
-        break
+    while True:
+        if not operator.Update():
+            break

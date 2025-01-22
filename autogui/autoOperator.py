@@ -2,18 +2,22 @@ import pyautogui
 import time
 
 class AutoOperator:
-    def __init__(self, operateDict : dict, configPath : str, loop : bool = False):
+    def __init__(self, operateDict : dict, configPath : str, loop : bool = False, printLog : bool = False):
         self._operateDict = operateDict
         self._operateIndex = 1
         self._configPath = configPath
         self._loop = loop
+        self._printLog = printLog
 
     def Update(self) -> bool:
         operation = self._operateDict[self._operateIndex]
         if 'search_pic' in operation:
             if not self.SearchPic(operation):
-                time.sleep(1)
-                return
+                if 'pic_retry_time' in operation:
+                    time.sleep(operation['pic_retry_time'])
+                else:
+                    time.sleep(1)
+                return True
             else:
                 self.Operate(operation)
         else:
@@ -36,14 +40,22 @@ class AutoOperator:
             confidence = 0.8 if not "confidence" in operation else operation['confidence']
             region = None if not 'pic_region' in operation else operation['pic_region']
 
-            startTime = time.time()
+            if self._printLog:
+                startTime = time.time()
+
             center = pyautogui.locateCenterOnScreen(f'{self._configPath}/{operation["search_pic"]}', confidence=confidence, region=region)            
-            print(f'搜索图片{operation["search_pic"]}用时: {time.time()-startTime}')
+
+            if self._printLog:
+                print(f'搜索图片 {operation["search_pic"]}用时: {time.time()-startTime:.2f},位置: {center}')
         except pyautogui.ImageNotFoundException:
+            if self._printLog:
+                print(f'搜索图片 {operation["search_pic"]}未找到')
             return False
         except Exception as e:
             raise e
         else:
+            if self._printLog:
+                print(f'搜索图片 移动到位置: {center}')
             pyautogui.moveTo(center)
             return True
 
@@ -102,6 +114,9 @@ class AutoOperator:
                             pyautogui.write(param[0], interval=float(param[1]))
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+
+            if self._printLog:
+                print(f'操作: {operation["operate"]}, 参数: {operateParam}')
 
         except Exception as e:
             raise e
