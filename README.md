@@ -10,3 +10,4 @@
 |kDown| key | 键盘按键按下(参数必须) |
 |kUp| key | 键盘按键松开(参数必须) |
 |write| text;interval | 键盘输入(参数text必须) |
+|pic|  | 识图 |
