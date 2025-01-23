@@ -17,13 +17,19 @@ print(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {
 
 if __name__ == "__main__":
     if MOUSE_MODE:
-        operator = autogui.MouseMode()
+        mainOperator = autogui.MouseMode()
         while True:
-            operator.Update()
+            mainOperator.Update()
     else:
-        dataDict = autogui.parser.ParseCsv(CONFIG_PATH)
-        operator = autogui.AutoOperator(dataDict, CONFIG_PATH, LOOP, PRINT_LOG)
+        subOperatorList = []
+        mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH), CONFIG_PATH, subOperatorList, LOOP, PRINT_LOG)
 
+        curSubOperator : autogui.AutoOperator = None
         while True:
-            if not operator.Update():
+            if curSubOperator:
+                if not curSubOperator.Update():
+                    curSubOperator = None
+            elif len(subOperatorList) > 0:
+                curSubOperator = subOperatorList.pop()
+            elif not mainOperator.Update():
                 break

@@ -1,11 +1,13 @@
 import pyautogui
 import time
+from .parser import GetCsv
 
 class AutoOperator:
-    def __init__(self, operateDict : dict, configPath : str, loop : bool = False, printLog : bool = False):
+    def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, loop : bool = False, printLog : bool = False):
         self._operateDict = operateDict
         self._operateIndex = 1
         self._configPath = configPath
+        self._subOperatorList = subOperatorList
         self._loop = loop
         self._printLog = printLog
 
@@ -32,6 +34,7 @@ class AutoOperator:
 
 
     def SearchPic(self, operation:dict):
+        operateParam = None if not 'operate_param' in operation else operation['operate_param']
         try:
             confidence = 0.8 if not "confidence" in operation else operation['confidence']
             region = None if not 'pic_region' in operation else operation['pic_region']
@@ -46,14 +49,32 @@ class AutoOperator:
         except pyautogui.ImageNotFoundException:
             if self._printLog:
                 print(f'搜索图片 {operation["search_pic"]}未找到')
+            
+            if operateParam:
+                param = operateParam.split(";")
+                if param[0] == 'notExist':
+                    if self._printLog:
+                        print(f'启动配置 {param[1]}')
+                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
+
+                    return None, lambda x : x
+
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x
         except Exception as e:
             raise e
         else:
             if self._printLog:
                 print(f'搜索图片 中心位置: {center}')
-            if not 'operate_param' in operation:
+            if not operateParam:
                 pyautogui.moveTo(center)
+            else:
+                param = operateParam.split(";")
+                if param[0] == 'exist':
+                    if self._printLog:
+                        print(f'启动配置 {param[1]}')
+                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                    
+                    return None, lambda x : x
 
             return None, None
 
@@ -62,6 +83,8 @@ class AutoOperator:
         indexChangeFunc = None
         try:
             operateParam = None if not 'operate_param' in operation else operation['operate_param']
+            if self._printLog:
+                print(f'操作: {operation["operate"]}, 参数: {operateParam}')
             match operation['operate']:
                 case 'click':
                     if operateParam:
@@ -117,8 +140,6 @@ class AutoOperator:
                 case 'pic':
                     operationWait, indexChangeFunc = self.SearchPic(operation)
 
-            if self._printLog:
-                print(f'操作: {operation["operate"]}, 参数: {operateParam}')
 
         except Exception as e:
             raise e

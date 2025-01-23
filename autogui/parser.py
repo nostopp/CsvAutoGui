@@ -1,11 +1,20 @@
 import csv
 
+csvDataDict = {}
+
 def CheckValueInCsv(row : dict, key : str) -> bool:
     return key in row and row[key] != None and len(row[key]) > 0
 
-def ParseCsv(path:str) -> dict:
+def GetCsv(path:str, fileName:str = "main.csv") -> dict:
+    if fileName in csvDataDict:
+        return csvDataDict[fileName]
+
+    csvDataDict[fileName] = ParseCsv(path, fileName)
+    return csvDataDict[fileName]
+
+def ParseCsv(path:str, fileName:str) -> dict:
     dataDict = dict()
-    with open(f'{path}/config.csv', mode='r', encoding='utf-8') as csvfile:
+    with open(f'{path}/{fileName}', mode='r', encoding='utf-8') as csvfile:
         # 使用csv.DictReader读取CSV文件，它将每一行转换为一个字典
         reader = csv.DictReader(csvfile)
         # 遍历CSV文件中的每一行
