@@ -52,12 +52,17 @@ class AutoOperator:
             
             if operateParam:
                 param = operateParam.split(";")
-                if param[0] == 'notExist':
-                    if self._printLog:
-                        print(f'启动配置 {param[1]}')
-                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
 
-                    return None, lambda x : x
+                match param[0]:
+                    case 'notExist':
+                        if self._printLog:
+                            print(f'启动配置 {param[1]}')
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
+
+                        return None, lambda x : x
+
+                    case 'exist':
+                        return None, None
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x
         except Exception as e:
