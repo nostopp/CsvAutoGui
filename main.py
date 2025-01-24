@@ -21,15 +21,11 @@ if __name__ == "__main__":
         while True:
             mainOperator.Update()
     else:
-        subOperatorList = []
+        subOperatorList : list[autogui.AutoOperator]= [] 
         mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH), CONFIG_PATH, subOperatorList, LOOP, PRINT_LOG)
 
-        curSubOperator : autogui.AutoOperator = None
         while True:
-            if curSubOperator:
-                if not curSubOperator.Update():
-                    curSubOperator = None
-            elif len(subOperatorList) > 0:
-                curSubOperator = subOperatorList.pop()
+            if len(subOperatorList) > 0 and not subOperatorList[-1].Update():
+                subOperatorList.pop()
             elif not mainOperator.Update():
                 break
