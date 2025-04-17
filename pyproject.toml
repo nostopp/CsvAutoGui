@@ -7,8 +7,11 @@ requires-python = ">=3.13"
 dependencies = [
     "keyboard>=0.13.5",
     "opencv-python>=4.11.0.86",
+    "paddleocr>=2.10.0",
+    "paddlepaddle>=3.0.0",
     "pillow>=11.1.0",
     "pyautogui>=0.9.54",
+    "setuptools>=78.1.0",
 ]
 
 [[tool.uv.index]]

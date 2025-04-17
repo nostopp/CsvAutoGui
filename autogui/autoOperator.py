@@ -115,7 +115,7 @@ class AutoOperator:
                 case 'mMoveTo':
                     if operateParam:
                         offset = operateParam.split(";")
-                        pyautogui.moveTo(xOffset=float(offset[0]), yOffset=float(offset[1]))
+                        pyautogui.moveTo(x=float(offset[0]), y=float(offset[1]))
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'press':
