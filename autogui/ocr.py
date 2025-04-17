@@ -1,5 +1,4 @@
 from paddleocr import PaddleOCR, draw_ocr
-from PIL import Image
 import pyautogui
 import cv2
 import numpy as np
@@ -13,13 +12,19 @@ def SaveOCRFile(ocrResult, cvImg):
     if ocrResult is None or cvImg is None:
         return
 
-    boxes = [detec[0] for line in ocrResult for detec in line]
-    # texts = [detec[1][0] for line in ocrResult for detec in line]
-    # confs = [detec[1][1] for line in ocrResult for detec in line]
-    im = draw_ocr(cvImg, boxes)
+    image = cv2.cvtColor(cvImg, cv2.COLOR_GRAY2RGB)  # 转换为RGB格式
 
-    im = Image.fromarray(im)
-    im.save(f'OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.jpg')
+    boxes = [detec[0] for line in ocrResult for detec in line]
+    texts = [detec[1][0] for line in ocrResult for detec in line]
+    scores = [detec[1][1] for line in ocrResult for detec in line]
+    visualized_image = draw_ocr(
+        image, 
+        boxes, 
+        texts, 
+        scores, 
+    )
+
+    cv2.imwrite(f'OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.jpg', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
 
 def FindTextInResult(ocrResult, findStr : str, confidence: float):
     if ocrResult is None:
@@ -37,6 +42,8 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
     return None, None
     
 def OCR(findStr:str, findRegion=None, confidence:float = 0.8) -> bool:
+    if findStr is None:
+        return
     screenshotIm = pyautogui.screenshot()
     cvImg = np.array(screenshotIm.convert('RGB'))
     cvImg = cvImg[:, :, ::-1].copy()  # -1 does RGB -> BGR
