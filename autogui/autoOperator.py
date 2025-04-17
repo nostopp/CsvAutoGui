@@ -1,4 +1,5 @@
 import pyautogui
+import pyperclip
 import time
 from .parser import GetCsv
 from .ocr import OCR
@@ -184,11 +185,8 @@ class AutoOperator:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'write':
                     if operateParam:
-                        param = operateParam.split(";")
-                        if len(param) == 1:
-                            pyautogui.write(param[0])
-                        elif len(param) == 2:
-                            pyautogui.write(param[0], interval=float(param[1]))
+                        pyperclip.copy(operateParam)
+                        pyautogui.hotkey('ctrl', 'v')
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'pic':

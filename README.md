@@ -20,7 +20,7 @@
 |press| key | 键盘按键(参数必须) |
 |kDown| key | 键盘按键按下(参数必须) |
 |kUp| key | 键盘按键松开(参数必须) |
-|write| text;interval | 键盘输入(参数text必须) |
+|write| text | 键盘输入(参数必须) |
 |pic| exist;fileName.csv or notExist;fileName.csv  | 识图 |
 |ocr| exist;fileName.csv or notExist;fileName.csv  | ocr |
 
