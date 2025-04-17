@@ -3,10 +3,11 @@ import pyautogui
 import cv2
 import numpy as np
 import time
+from main import CONFIG_PATH
 
 SAVE_OCR_FILE = False
 
-ocr = PaddleOCR(use_angle_cls=True, lang='ch')
+ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
 
 def SaveOCRFile(ocrResult, cvImg):
     if ocrResult is None or cvImg is None:
@@ -14,9 +15,9 @@ def SaveOCRFile(ocrResult, cvImg):
 
     image = cv2.cvtColor(cvImg, cv2.COLOR_GRAY2RGB)  # 转换为RGB格式
 
-    boxes = [detec[0] for line in ocrResult for detec in line]
-    texts = [detec[1][0] for line in ocrResult for detec in line]
-    scores = [detec[1][1] for line in ocrResult for detec in line]
+    boxes = [detec[0] for line in ocrResult for detec in line or {}]
+    texts = [detec[1][0] for line in ocrResult for detec in line or {}]
+    scores = [detec[1][1] for line in ocrResult for detec in line or {}]
     visualized_image = draw_ocr(
         image, 
         boxes, 
@@ -24,20 +25,31 @@ def SaveOCRFile(ocrResult, cvImg):
         scores, 
     )
 
-    cv2.imwrite(f'OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.jpg', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(f'{CONFIG_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.jpg', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
+
+def GetTargetCenter(points, findStr, word):
+    wordBox = np.array(points)  # 文本框四个点坐标
+                
+    # 计算目标词在文本中的位置比例
+    wordIdx = word.find(findStr)
+    wordLen = len(findStr)
+    totalLen = len(word)
+    
+    midRatio = (2 * wordIdx + wordLen) / totalLen / 2
+    midPoint = wordBox[0] + (wordBox[1]-wordBox[0]) * midRatio
+    midPoint += (wordBox[3] - wordBox[0]) / 2
+    return int(midPoint[0]), int(midPoint[1])
 
 def FindTextInResult(ocrResult, findStr : str, confidence: float):
     if ocrResult is None:
         return None, None
 
     for line in ocrResult:
-        for word_info in line:
+        for word_info in line or []:
             word, conf = word_info[1]
             if findStr in word and conf >= confidence:
                 points = word_info[0]
-                xCenter = int(sum(p[0] for p in points) / 4)
-                yCenter = int(sum(p[1] for p in points) / 4)
-                return xCenter, yCenter
+                return GetTargetCenter(points, findStr, word)
     
     return None, None
     
@@ -46,13 +58,15 @@ def OCR(findStr:str, findRegion=None, confidence:float = 0.8) -> bool:
         return
     screenshotIm = pyautogui.screenshot()
     cvImg = np.array(screenshotIm.convert('RGB'))
-    cvImg = cvImg[:, :, ::-1].copy()  # -1 does RGB -> BGR
-    cvImg = cv2.cvtColor(cvImg, cv2.COLOR_BGR2GRAY)
+    cvImg = cv2.cvtColor(cvImg, cv2.COLOR_RGB2GRAY)
     if findRegion and len(findRegion) == 4:
         cvImg = cvImg[findRegion[1]:findRegion[1] + findRegion[3], findRegion[0]:findRegion[0] + findRegion[2]]
     result = ocr.ocr(cvImg, cls=True)
 
     xCenter, yCenter = FindTextInResult(result, findStr, confidence)
+    if xCenter and yCenter and findRegion and len(findRegion) == 4:
+        xCenter += findRegion[0]
+        yCenter += findRegion[1]
 
     if SAVE_OCR_FILE:
         SaveOCRFile(result, cvImg)

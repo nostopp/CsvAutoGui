@@ -1,6 +1,5 @@
 import argparse
 import autogui
-import autogui.autoOperator
 
 parser = argparse.ArgumentParser(description="自动化操作")
 parser.add_argument("-p", "--path", type=str, help="运行配置路径", default="config/test")

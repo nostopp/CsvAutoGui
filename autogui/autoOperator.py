@@ -1,6 +1,7 @@
 import pyautogui
 import time
 from .parser import GetCsv
+from .ocr import OCR
 
 class AutoOperator:
     def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, loop : bool = False, printLog : bool = False):
@@ -35,20 +36,20 @@ class AutoOperator:
 
     def SearchPic(self, operation:dict):
         operateParam = None if not 'operate_param' in operation else operation['operate_param']
+        if self._printLog:
+            startTime = time.time()
         try:
             confidence = 0.8 if not "confidence" in operation else operation['confidence']
             region = None if not 'pic_region' in operation else operation['pic_region']
 
-            if self._printLog:
-                startTime = time.time()
 
             center = pyautogui.locateCenterOnScreen(f'{self._configPath}/{operation["search_pic"]}', confidence=confidence, region=region)            
 
             if self._printLog:
-                print(f'搜索图片 {operation["search_pic"]}用时: {time.time()-startTime:.2f},位置: {center}')
+                print(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}')
         except pyautogui.ImageNotFoundException:
             if self._printLog:
-                print(f'搜索图片 {operation["search_pic"]}未找到')
+                print(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
             
             if operateParam:
                 param = operateParam.split(";")
@@ -68,10 +69,58 @@ class AutoOperator:
         except Exception as e:
             raise e
         else:
-            if self._printLog:
-                print(f'搜索图片 中心位置: {center}')
             if not operateParam:
                 pyautogui.moveTo(center)
+            else:
+                param = operateParam.split(";")
+                if param[0] == 'exist':
+                    if self._printLog:
+                        print(f'启动配置 {param[1]}')
+                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                    
+                    return None, lambda x : x
+
+            return None, None
+
+    def Ocr(self, operation:dict):
+        operateParam = None if not 'operate_param' in operation else operation['operate_param']
+
+        if self._printLog:
+            startTime = time.time()
+        
+        confidence = 0.9 if not "confidence" in operation else operation['confidence']
+        region = None if not 'pic_region' in operation else operation['pic_region']
+
+        if self._printLog:
+            startTime = time.time()
+
+        xCenter, yCenter = OCR(operation["search_pic"], region, confidence)            
+
+        if xCenter is None or yCenter is None:
+            if self._printLog:
+                print(f'ocr {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
+
+            if operateParam:
+                param = operateParam.split(";")
+
+                match param[0]:
+                    case 'notExist':
+                        if self._printLog:
+                            print(f'启动配置 {param[1]}')
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
+
+                        return None, lambda x : x
+
+                    case 'exist':
+                        return None, None
+
+            return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x
+        else:
+            if self._printLog:
+                print(f'ocr {operation["search_pic"]}, 用时: {time.time()-startTime:.2f}, 位置: {xCenter},{yCenter}')
+
+            if not operateParam:
+                pyautogui.moveTo(xCenter, yCenter)
             else:
                 param = operateParam.split(";")
                 if param[0] == 'exist':
@@ -144,6 +193,8 @@ class AutoOperator:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'pic':
                     operationWait, indexChangeFunc = self.SearchPic(operation)
+                case 'ocr':
+                    operationWait, indexChangeFunc = self.Ocr(operation)
 
 
         except Exception as e:

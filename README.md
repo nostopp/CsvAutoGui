@@ -22,6 +22,8 @@
 |kUp| key | 键盘按键松开(参数必须) |
 |write| text;interval | 键盘输入(参数text必须) |
 |pic| exist;fileName.csv or notExist;fileName.csv  | 识图 |
+|ocr| exist;fileName.csv or notExist;fileName.csv  | ocr |
 
 #### 一些说明
-pic操作在没有操作参数时默认不断找图直到找到后将鼠标移至图片中心,在使用exist或者notExist后不满足条件将执行下一步不会持续找图
+* pic与ocr操作在没有操作参数时默认不断找图直到找到后将鼠标移至图片中心
+* pic与ocr在使用exist或者notExist后不满足条件将执行下一步不会持续找图,满足条件将会启动新的csv,执行完毕将重新执行此步
