@@ -1,1 +1,6 @@
 __pycache__
+.vscode
+config/*/
+ocr_model/cls
+ocr_model/det
+ocr_model/rec

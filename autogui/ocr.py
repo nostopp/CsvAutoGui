@@ -7,7 +7,7 @@ import time
 SAVE_OCR_FILE = False
 OCR_FILE_PATH = None
 
-ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
+ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False, det_model_dir='ocr_model/det', rec_model_dir='ocr_model/rec', cls_model_dir='ocr_model/cls')
 
 def SaveOCRFile(ocrResult, cvImg):
     if ocrResult is None or cvImg is None:
