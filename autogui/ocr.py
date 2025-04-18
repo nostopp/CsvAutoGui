@@ -3,9 +3,9 @@ import pyautogui
 import cv2
 import numpy as np
 import time
-from main import CONFIG_PATH
 
 SAVE_OCR_FILE = False
+OCR_FILE_PATH = None
 
 ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
 
@@ -25,7 +25,7 @@ def SaveOCRFile(ocrResult, cvImg):
         scores, 
     )
 
-    cv2.imwrite(f'{CONFIG_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.jpg', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(f'{OCR_FILE_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.jpg', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
 
 def GetTargetCenter(points, findStr, word):
     wordBox = np.array(points)  # 文本框四个点坐标

@@ -14,6 +14,9 @@ PRINT_LOG = args.log
 MOUSE_MODE = args.mouse
 print(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 打印鼠标位置模式: {MOUSE_MODE}")
 
+if autogui.ocr.SAVE_OCR_FILE:
+    autogui.ocr.OCR_FILE_PATH = CONFIG_PATH
+
 if __name__ == "__main__":
     if MOUSE_MODE:
         mainOperator = autogui.MouseMode()
