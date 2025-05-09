@@ -6,13 +6,15 @@ parser.add_argument("-p", "--path", type=str, help="运行配置路径", default
 parser.add_argument("-l", "--loop", action="store_true", help="是否循环", default=False)
 parser.add_argument("--log", action="store_true", help="是否打印日志", default=False)
 parser.add_argument("--mouse", action="store_true", help="打印鼠标位置模式", default=False)
+parser.add_argument("-s", "--screenshots", action="store_true", help="截图模式", default=False)
 args = parser.parse_args()
 
 CONFIG_PATH = args.path
 LOOP = args.loop
 PRINT_LOG = args.log
 MOUSE_MODE = args.mouse
-print(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 打印鼠标位置模式: {MOUSE_MODE}")
+SCREENSHOT_MODE = args.screenshots
+print(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 打印鼠标位置模式: {MOUSE_MODE}, 截图模式: {args.screenshots}")
 
 if autogui.ocr.SAVE_OCR_FILE:
     autogui.ocr.OCR_FILE_PATH = CONFIG_PATH
@@ -20,6 +22,10 @@ if autogui.ocr.SAVE_OCR_FILE:
 if __name__ == "__main__":
     if MOUSE_MODE:
         mainOperator = autogui.MouseMode()
+        while True:
+            mainOperator.Update()
+    elif SCREENSHOT_MODE:
+        mainOperator = autogui.ScreenshotMode()
         while True:
             mainOperator.Update()
     else:

@@ -1,5 +1,6 @@
 __pycache__
 .vscode
+screenshot
 config/*/
 ocr_model/cls
 ocr_model/det
