@@ -1,4 +1,5 @@
 import argparse
+import keyboard
 import autogui
 
 parser = argparse.ArgumentParser(description="自动化操作")
@@ -20,19 +21,25 @@ if autogui.ocr.SAVE_OCR_FILE:
     autogui.ocr.OCR_FILE_PATH = CONFIG_PATH
 
 if __name__ == "__main__":
+    KEEP_RUN = True
+    def exit():
+        global KEEP_RUN
+        KEEP_RUN = False
+    keyboard.add_hotkey('shift+ctrl+x', exit)
+
     if MOUSE_MODE:
         mainOperator = autogui.MouseMode()
-        while True:
+        while KEEP_RUN:
             mainOperator.Update()
     elif SCREENSHOT_MODE:
         mainOperator = autogui.ScreenshotMode()
-        while True:
+        while KEEP_RUN:
             mainOperator.Update()
     else:
         subOperatorList : list[autogui.AutoOperator]= [] 
         mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH), CONFIG_PATH, subOperatorList, LOOP, PRINT_LOG)
 
-        while True:
+        while KEEP_RUN:
             if len(subOperatorList) > 0 and not subOperatorList[-1].Update():
                 subOperatorList.pop()
             elif not mainOperator.Update():

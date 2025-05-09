@@ -3,6 +3,7 @@ import time
 import os
 import keyboard
 import pyautogui
+import winsound
 
 screenshotDir = 'screenshot'
 
@@ -37,6 +38,11 @@ class ScreenshotMode:
         filename = f"{left};{top};{width};{height}_{time_str}.png"
         filepath = os.path.join(screenshotDir, filename)
         screenshot.save(filepath)
+
+        try:
+            winsound.Beep(200, 100)
+        except:
+            pass
         print(f"截图已保存: {filepath}")
 
     def Update(self):
