@@ -1,5 +1,4 @@
 version = 1
-revision = 1
 requires-python = ">=3.13"
 resolution-markers = [
     "sys_platform == 'darwin'",
@@ -81,6 +80,7 @@ dependencies = [
     { name = "paddlepaddle" },
     { name = "pillow" },
     { name = "pyautogui" },
+    { name = "pydirectinput" },
     { name = "setuptools" },
 ]
 
@@ -92,6 +92,7 @@ requires-dist = [
     { name = "paddlepaddle", specifier = ">=3.0.0" },
     { name = "pillow", specifier = ">=11.1.0" },
     { name = "pyautogui", specifier = ">=0.9.54" },
+    { name = "pydirectinput", specifier = ">=1.0.4" },
     { name = "setuptools", specifier = ">=78.1.0" },
 ]
 
@@ -605,6 +606,15 @@ wheels = [
     { url = "http://mirrors.aliyun.com/pypi/packages/ef/fd/24ea4302d7a527d672c5be06e17df16aabfb4e9fdc6e0b345c21580f3d2a/pydantic_core-2.33.1-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:401d7b76e1000d0dd5538e6381d28febdcacb097c8d340dde7d7fc6e13e9f95d" },
     { url = "http://mirrors.aliyun.com/pypi/packages/5f/95/4fbc2ecdeb5c1c53f1175a32d870250194eb2fdf6291b795ab08c8646d5d/pydantic_core-2.33.1-cp313-cp313t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7aeb055a42d734c0255c9e489ac67e75397d59c6fbe60d155851e9782f276a9c" },
     { url = "http://mirrors.aliyun.com/pypi/packages/71/ae/fe31e7f4a62431222d8f65a3bd02e3fa7e6026d154a00818e6d30520ea77/pydantic_core-2.33.1-cp313-cp313t-win_amd64.whl", hash = "sha256:338ea9b73e6e109f15ab439e62cb3b78aa752c7fd9536794112e14bee02c8d18" },
+]
+
+[[package]]
+name = "pydirectinput"
+version = "1.0.4"
+source = { registry = "http://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "http://mirrors.aliyun.com/pypi/packages/5f/c0/cbcc5f1653d956ee2109b604747b7eaf37d59e50b41cc9dedabedf70aec6/PyDirectInput-1.0.4.tar.gz", hash = "sha256:bebe65102c69208688402f9f4cbd2ae7afc174fd2123e156e178b1304e7f80a2" }
+wheels = [
+    { url = "http://mirrors.aliyun.com/pypi/packages/c9/8e/f909defe798270afc2241d3a8986d51459e70c37f02d2ba549627b781b2c/PyDirectInput-1.0.4-py3-none-any.whl", hash = "sha256:238bbe97f505f9c8728a47ea6a787750dbe834ec1fb42b98b3d703d827eda83e" },
 ]
 
 [[package]]

@@ -1,4 +1,5 @@
 import pyautogui
+import pydirectinput
 import pyperclip
 import time
 from .parser import GetCsv
@@ -14,6 +15,9 @@ class AutoOperator:
         self._printLog = printLog
 
     def Update(self) -> bool:
+        if len(self._operateDict) <= 0:
+            return False
+
         operation = self._operateDict[self._operateIndex]
 
         operationWait, indexChangeFunc = self.Operate(operation)
@@ -71,7 +75,8 @@ class AutoOperator:
             raise e
         else:
             if not operateParam:
-                pyautogui.moveTo(center)
+                # pyautogui.moveTo(center)
+                pydirectinput.moveTo(center.x, center.y)
             else:
                 param = operateParam.split(";")
                 if param[0] == 'exist':
@@ -121,7 +126,8 @@ class AutoOperator:
                 print(f'ocr {operation["search_pic"]}, 用时: {time.time()-startTime:.2f}, 位置: {xCenter},{yCenter}')
 
             if not operateParam:
-                pyautogui.moveTo(xCenter, yCenter)
+                # pyautogui.moveTo(xCenter, yCenter)
+                pydirectinput.moveTo(xCenter, yCenter)
             else:
                 param = operateParam.split(";")
                 if param[0] == 'exist':
@@ -143,44 +149,55 @@ class AutoOperator:
             match operation['operate']:
                 case 'click':
                     if operateParam:
-                        pyautogui.click(button=operateParam)
+                        # pyautogui.click(button=operateParam)
+                        pydirectinput.click(button=operateParam)
                     else:
-                        pyautogui.click()                    
+                        # pyautogui.click()                    
+                        pydirectinput.click()
                 case 'mDown':
                     if operateParam:
-                        pyautogui.mouseDown(button=operateParam)
+                        # pyautogui.mouseDown(button=operateParam)
+                        pydirectinput.mouseDown(button=operateParam)
                     else:
-                        pyautogui.mouseDown()                                        
+                        # pyautogui.mouseDown()                                        
+                        pydirectinput.mouseDown()                                        
                 case 'mUp':
                     if operateParam:
-                        pyautogui.mouseUp(button=operateParam)
+                        # pyautogui.mouseUp(button=operateParam)
+                        pydirectinput.mouseUp(button=operateParam)
                     else:
-                        pyautogui.mouseUp()                                       
+                        # pyautogui.mouseUp()                                       
+                        pydirectinput.mouseUp()                                       
                 case 'mMove':
                     if operateParam:
                         offset = operateParam.split(";")
-                        pyautogui.moveRel(xOffset=float(offset[0]), yOffset=float(offset[1]))
+                        # pyautogui.moveRel(xOffset=float(offset[0]), yOffset=float(offset[1]))
+                        pydirectinput.moveRel(xOffset=int(offset[0]), yOffset=int(offset[1]))
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'mMoveTo':
                     if operateParam:
                         offset = operateParam.split(";")
-                        pyautogui.moveTo(x=float(offset[0]), y=float(offset[1]))
+                        # pyautogui.moveTo(x=float(offset[0]), y=float(offset[1]))
+                        pydirectinput.moveTo(x=int(offset[0]), y=int(offset[1]))
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'press':
                     if operateParam:
-                        pyautogui.press(operateParam)
+                        # pyautogui.press(operateParam)
+                        pydirectinput.press(operateParam)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'kDown':
                     if operateParam:
-                        pyautogui.keyDown(operateParam)
+                        # pyautogui.keyDown(operateParam)
+                        pydirectinput.keyDown(operateParam)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'kUp':
                     if operateParam:
-                        pyautogui.keyUp(operateParam)
+                        # pyautogui.keyUp(operateParam)
+                        pydirectinput.keyUp(operateParam)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'write':

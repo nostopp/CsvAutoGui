@@ -40,7 +40,9 @@ if __name__ == "__main__":
         mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH), CONFIG_PATH, subOperatorList, LOOP, PRINT_LOG)
 
         while KEEP_RUN:
-            if len(subOperatorList) > 0 and not subOperatorList[-1].Update():
-                subOperatorList.pop()
-            elif not mainOperator.Update():
-                break
+            if len(subOperatorList) > 0:
+                if not subOperatorList[-1].Update():
+                    subOperatorList.pop()
+            else:
+                if not mainOperator.Update():
+                    break
