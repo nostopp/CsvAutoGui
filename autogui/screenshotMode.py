@@ -35,7 +35,7 @@ class ScreenshotMode:
         screenshot = pyautogui.screenshot(region=(left, top, width, height))
 
         time_str = datetime.datetime.now().strftime("%m%d%H%M%S")
-        filename = f"{left};{top};{width};{height}_{time_str}.png"
+        filename = f"{time_str}_{left};{top};{width};{height}.png"
         filepath = os.path.join(screenshotDir, filename)
         screenshot.save(filepath)
 
