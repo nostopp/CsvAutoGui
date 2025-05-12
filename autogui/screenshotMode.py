@@ -11,18 +11,22 @@ class ScreenshotMode:
     def __init__(self):
         if not os.path.exists(screenshotDir):
             os.makedirs(screenshotDir)
-        self._pressCount = 0
-        self._lastPos = None
+        self._pressShotCount = 0
+        self._lastShotPos = None
         keyboard.add_hotkey('shift+x', self.PressScreenshot)
 
+        self._pressMouseCount = 0
+        self._lastMousePos = None
+        keyboard.add_hotkey('shift+c', self.PressMousePosition)
+
     def PressScreenshot(self):
-        self._pressCount += 1
+        self._pressShotCount += 1
         pos = pyautogui.position()
         print(f'鼠标位置: {pos}')
-        if self._pressCount >= 2:
-            self.Screenshot(self._lastPos, pos)
-            self._pressCount = 0
-        self._lastPos = pos
+        if self._pressShotCount >= 2:
+            self.Screenshot(self._lastShotPos, pos)
+            self._pressShotCount = 0
+        self._lastShotPos = pos
 
     def Screenshot(self, pos1, pos2):
         x1, y1 = pos1
@@ -44,6 +48,15 @@ class ScreenshotMode:
         except:
             pass
         print(f"截图已保存: {filepath}")
+
+    def PressMousePosition(self):
+        self._pressMouseCount += 1
+        pos = pyautogui.position()
+        print(f'鼠标位置: {pos}')
+        if self._pressMouseCount >= 2:
+            self._pressMouseCount = 0
+            print(f'鼠标位置相差: {pos.x - self._lastMousePos.x}, {pos.y - self._lastMousePos.y}')
+        self._lastMousePos = pos
 
     def Update(self):
         time.sleep(1)
