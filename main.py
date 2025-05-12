@@ -3,13 +3,13 @@ import keyboard
 import autogui
 
 parser = argparse.ArgumentParser(description="自动化操作")
-parser.add_argument("-p", "--path", type=str, help="运行配置路径", default="config/test")
+parser.add_argument("-c", "--config", type=str, help="运行配置路径", default="config/test")
 parser.add_argument("-l", "--loop", action="store_true", help="是否循环", default=False)
 parser.add_argument("--log", action="store_true", help="是否打印日志", default=False)
 parser.add_argument("-s", "--screenshots", action="store_true", help="截图模式", default=False)
 args = parser.parse_args()
 
-CONFIG_PATH = args.path
+CONFIG_PATH = args.config
 LOOP = args.loop
 PRINT_LOG = args.log
 SCREENSHOT_MODE = args.screenshots
