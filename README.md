@@ -6,6 +6,8 @@
 | -l --loop| 自动化是否循环 |
 | --log | 是否打印日志 |
 | --mouse | 运行在特殊的鼠标模式 |
+
+ctrl+shift+x 终止程序运行
 #### 截图模式
 在该模式下按下 shift+x 将打印当前坐标,第二次按下将计算与第一次的坐标差值,并将两次坐标间的范围截图保存到screenshot目录下
 在该模式下按下 shift+c 将打印当前坐标,第二次按下将计算与第一次的坐标差值,便于配置填写
@@ -24,6 +26,7 @@
 |write| text | 键盘输入(参数必须) |
 |pic| exist;fileName.csv or notExist;fileName.csv  | 识图 |
 |ocr| exist;fileName.csv or notExist;fileName.csv  | ocr |
+|end|   | 终止该csv的继续执行 |
 
 #### 一些说明
 * pic与ocr操作在没有操作参数时默认不断找图直到找到后将鼠标移至图片中心

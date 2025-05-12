@@ -210,7 +210,8 @@ class AutoOperator:
                     operationWait, indexChangeFunc = self.SearchPic(operation)
                 case 'ocr':
                     operationWait, indexChangeFunc = self.Ocr(operation)
-
+                case 'end':
+                    indexChangeFunc = lambda x : len(self._operateDict) + 1
 
         except Exception as e:
             raise e

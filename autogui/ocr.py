@@ -18,6 +18,7 @@ class LazyPaddleOCR:
         self._drawOcr = None
         self._startedInit = False
         self._initThread = threading.Thread(target=self.initialize)
+        self._initThread.daemon = True
         self._initThread.start()
 
     @classmethod
