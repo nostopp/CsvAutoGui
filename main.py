@@ -40,3 +40,5 @@ if __name__ == "__main__":
             else:
                 if not mainOperator.Update():
                     break
+
+    keyboard.unhook_all()
