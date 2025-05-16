@@ -19,6 +19,8 @@ class ScreenshotMode:
         self._lastMousePos = None
         keyboard.add_hotkey('shift+c', self.PressMousePosition)
 
+        keyboard.add_hotkey('shift+f', self.PressFullScreenshot)
+
     def PressScreenshot(self):
         self._pressShotCount += 1
         pos = pyautogui.position()
@@ -27,6 +29,15 @@ class ScreenshotMode:
             self.Screenshot(self._lastShotPos, pos)
             self._pressShotCount = 0
         self._lastShotPos = pos
+
+    def PressFullScreenshot(self):
+        try:
+            import ctypes
+        except:
+            return
+        pos1 = (ctypes.windll.user32.GetSystemMetrics(76), ctypes.windll.user32.GetSystemMetrics(77))
+        pos2 = (ctypes.windll.user32.GetSystemMetrics(76) + ctypes.windll.user32.GetSystemMetrics(78), ctypes.windll.user32.GetSystemMetrics(77) + ctypes.windll.user32.GetSystemMetrics(79))
+        self.Screenshot(pos1, pos2)
 
     def Screenshot(self, pos1, pos2):
         x1, y1 = pos1
