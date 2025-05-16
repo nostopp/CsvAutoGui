@@ -4,6 +4,7 @@ if sys.platform == "win32":
     from functools import partial
     pyscreeze.screenshot = partial(pyscreeze._screenshot_win32, allScreens=True)
 
+from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
 from .autoOperator import AutoOperator

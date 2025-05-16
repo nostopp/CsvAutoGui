@@ -2,6 +2,7 @@ import pyautogui
 import pydirectinput
 import pyperclip
 import time
+from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
 
@@ -47,8 +48,8 @@ class AutoOperator:
             confidence = 0.8 if not "confidence" in operation else operation['confidence']
             region = None if not 'pic_region' in operation else operation['pic_region']
 
-
-            center = pyautogui.locateCenterOnScreen(f'{self._configPath}/{operation["search_pic"]}', confidence=confidence, region=region)            
+            img = ScaleHelper.Instance().getScaleImg(f'{self._configPath}/{operation["search_pic"]}')
+            center = pyautogui.locateCenterOnScreen(img, confidence=confidence, region=region)            
 
             if self._printLog:
                 print(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}')
@@ -172,14 +173,15 @@ class AutoOperator:
                     if operateParam:
                         offset = operateParam.split(";")
                         # pyautogui.moveRel(xOffset=float(offset[0]), yOffset=float(offset[1]))
-                        pydirectinput.moveRel(xOffset=int(offset[0]), yOffset=int(offset[1]))
+                        pydirectinput.moveRel(xOffset=ScaleHelper.Instance().getScaleInt(int(offset[0])), yOffset=ScaleHelper.Instance().getScaleInt(int(offset[1])))
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'mMoveTo':
                     if operateParam:
                         offset = operateParam.split(";")
                         # pyautogui.moveTo(x=float(offset[0]), y=float(offset[1]))
-                        pydirectinput.moveTo(x=int(offset[0]), y=int(offset[1]))
+                        pos = ScaleHelper.Instance().getScalePos((int(offset[0]), int(offset[1])))
+                        pydirectinput.moveTo(x=pos[0], y=pos[1])
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'press':

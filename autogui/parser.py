@@ -1,4 +1,5 @@
 import csv
+from .scaleHelper import ScaleHelper
 
 csvDataDict = {}
 
@@ -29,7 +30,8 @@ def ParseCsv(path:str, fileName:str) -> dict:
                 value['search_pic'] = row['图片/ocr名称']
             if CheckValueInCsv(row, '图片/ocr坐标范围'):
                 region = row['图片/ocr坐标范围'].split(";")
-                value['pic_region'] = (int(region[0]),int(region[1]),int(region[2]),int(region[3]))
+                region = ScaleHelper.Instance().getScaleRegion((int(region[0]),int(region[1]),int(region[2]),int(region[3])))
+                value['pic_region'] = region
             if CheckValueInCsv(row, '图片/ocr置信度'):
                 value['confidence'] = float(row['图片/ocr置信度'])
             if CheckValueInCsv(row, '完成后等待时间'):
