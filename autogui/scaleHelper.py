@@ -9,9 +9,10 @@ class ScaleHelper:
             cls._instance = ScaleHelper()
         return cls._instance
 
-    def Init(self, scale, offset):
+    def Init(self, scale, offset, scale_image):
         self.scale = scale
         self.offset = offset
+        self.scale_image = scale_image
         self.need_scale = False
         self.need_offset = False
 
@@ -73,7 +74,7 @@ class ScaleHelper:
     def getScaleImg(self, imgPath):
         img = cv2.imread(imgPath, cv2.IMREAD_COLOR)
 
-        if not self.need_scale:
+        if not self.scale_image or not self.need_scale:
             return img
         img = cv2.resize(img, (
             int(img.shape[1] * self.scale),

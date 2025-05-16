@@ -7,6 +7,7 @@
 | --log | 是否打印日志 | False |
 | -s --screen | 运行在截图模式 | False |
 | --scale | 运行分辨率与配置分辨率的比值 | 1 |
+| --scale_image | 缩放时是否缩放用到的截图 | False |
 | --offset | 运行时对涉及到的绝对坐标进行偏移 | 0;0 |
 
 ctrl+shift+x 终止程序运行
