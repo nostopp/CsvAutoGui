@@ -2,6 +2,7 @@ import pyautogui
 import pydirectinput
 import pyperclip
 import time
+import random
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
@@ -21,11 +22,17 @@ class AutoOperator:
 
         operation = self._operateDict[self._operateIndex]
 
-        operationWait, indexChangeFunc = self.Operate(operation)
+        operationWait, indexChangeFunc, operationWaitRandom = self.Operate(operation)
         if operationWait and operationWait > 0:
-            time.sleep(operationWait)
+            if not operationWaitRandom:
+                time.sleep(operationWait)
+            else:
+                time.sleep(operationWait + random.random()*operationWaitRandom)
         elif 'wait' in operation:
-            time.sleep(operation['wait'])
+            if 'wait_random' in operation:
+                time.sleep(operation['wait'] + random.random()*operation['wait_random'])
+            else:
+                time.sleep(operation['wait'])
 
         if indexChangeFunc:
             self._operateIndex = indexChangeFunc(self._operateIndex)
@@ -71,7 +78,7 @@ class AutoOperator:
                     case 'exist':
                         return None, None
 
-            return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x
+            return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         except Exception as e:
             raise e
         else:
@@ -121,7 +128,7 @@ class AutoOperator:
                     case 'exist':
                         return None, None
 
-            return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x
+            return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         else:
             if self._printLog:
                 print(f'ocr {operation["search_pic"]}, 用时: {time.time()-startTime:.2f}, 位置: {xCenter},{yCenter}')
@@ -143,6 +150,7 @@ class AutoOperator:
     def Operate(self, operation:dict):
         operationWait = None
         indexChangeFunc = None
+        operationWaitRandom = None
         try:
             operateParam = None if not 'operate_param' in operation else operation['operate_param']
             if self._printLog:
@@ -209,13 +217,13 @@ class AutoOperator:
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'pic':
-                    operationWait, indexChangeFunc = self.SearchPic(operation)
+                    operationWait, indexChangeFunc, operationWaitRandom = self.SearchPic(operation)
                 case 'ocr':
-                    operationWait, indexChangeFunc = self.Ocr(operation)
+                    operationWait, indexChangeFunc, operationWaitRandom = self.Ocr(operation)
                 case 'end':
                     indexChangeFunc = lambda x : len(self._operateDict) + 1
 
         except Exception as e:
             raise e
 
-        return operationWait, indexChangeFunc
+        return operationWait, indexChangeFunc, operationWaitRandom

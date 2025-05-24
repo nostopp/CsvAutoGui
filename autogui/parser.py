@@ -35,9 +35,19 @@ def ParseCsv(path:str, fileName:str) -> dict:
             if CheckValueInCsv(row, '图片/ocr置信度'):
                 value['confidence'] = float(row['图片/ocr置信度'])
             if CheckValueInCsv(row, '完成后等待时间'):
-                value['wait'] = float(row['完成后等待时间'])
+                if ';' in row['完成后等待时间']:
+                    param = str.split(row['完成后等待时间'], ';')
+                    value['wait'] = float(param[0])
+                    value['wait_random'] = float(param[1])
+                else:
+                    value['wait'] = float(row['完成后等待时间'])
             if CheckValueInCsv(row, '未找到图片/ocr重试时间'):
-                value['pic_retry_time'] = float(row['未找到图片/ocr重试时间'])
+                if ';' in row['未找到图片/ocr重试时间']:
+                    param = str.split(row['未找到图片/ocr重试时间'], ';')
+                    value['pic_retry_time'] = float(param[0])
+                    value['pic_retry_time_random'] = float(param[1])
+                else:
+                    value['pic_retry_time'] = float(row['未找到图片/ocr重试时间'])
             # 将键值对添加到字典中
             dataDict[key] = value
         return dataDict
