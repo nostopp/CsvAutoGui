@@ -73,10 +73,10 @@ class AutoOperator:
                             print(f'启动配置 {param[1]}')
                         self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
 
-                        return None, lambda x : x
+                        return None, lambda x : x, None
 
                     case 'exist':
-                        return None, None
+                        return None, None, None
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         except Exception as e:
@@ -92,9 +92,9 @@ class AutoOperator:
                         print(f'启动配置 {param[1]}')
                     self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
                     
-                    return None, lambda x : x
+                    return None, lambda x : x, None
 
-            return None, None
+            return None, None, None
 
     def Ocr(self, operation:dict):
         operateParam = None if not 'operate_param' in operation else operation['operate_param']
@@ -123,10 +123,10 @@ class AutoOperator:
                             print(f'启动配置 {param[1]}')
                         self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
 
-                        return None, lambda x : x
+                        return None, lambda x : x, None
 
                     case 'exist':
-                        return None, None
+                        return None, None, None
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         else:
@@ -143,9 +143,9 @@ class AutoOperator:
                         print(f'启动配置 {param[1]}')
                     self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
                     
-                    return None, lambda x : x
+                    return None, lambda x : x, None
 
-            return None, None
+            return None, None, None
 
     def Operate(self, operation:dict):
         operationWait = None
