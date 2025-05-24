@@ -1,8 +1,9 @@
 本项目通过配置csv来进行一些自动化操作
 
 ### 使用说明
-本项目使用uv管理,需安装[uv](https://docs.astral.sh/uv/)
-在config下新建文件夹并命名,在其中创建主配置main.csv,之后参考template及example配置完毕后(example图片名格式皆为用自带截图模式截图,图片仅保留一个示意).uv run main.py -c config/文件夹名称 运行
+本项目使用uv管理,需安装[uv](https://docs.astral.sh/uv/)     
+在config下新建文件夹并命名,在其中创建主配置main.csv,之后参考template及example配置完毕后(example图片名格式皆为用自带截图模式截图,图片仅保留一个示意)     
+uv run main.py -c config/文件夹名称 运行        
 | 运行参数 | 说明 | 默认值 |
 | :-: | :-: | :-: |
 | -p --path | 指定配置文件夹路径 | config/test |
@@ -15,9 +16,9 @@
 
 ctrl+shift+x 终止程序运行
 #### 截图模式
-在该模式下按下 shift+x 将打印当前坐标,第二次按下将计算与第一次的坐标差值,并将两次坐标间的范围截图保存到screenshot目录下
-在该模式下按下 shift+c 将打印当前坐标,第二次按下将计算与第一次的坐标差值,便于配置填写
-在该模式下按下 shift+f 将进行全屏幕截图
+在该模式下按下 shift+x 将打印当前坐标,第二次按下将计算与第一次的坐标差值,并将两次坐标间的范围截图保存到screenshot目录下 
+在该模式下按下 shift+c 将打印当前坐标,第二次按下将计算与第一次的坐标差值,便于配置填写   
+在该模式下按下 shift+f 将进行全屏幕截图     
 
 ### csv各列说明
 | 列 | 说明 | 示例(/分开代表不同示例) |
