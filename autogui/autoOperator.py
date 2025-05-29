@@ -1,5 +1,6 @@
 import pyautogui
 import pydirectinput
+pydirectinput.PAUSE = 0.001
 import pyperclip
 import time
 import random
