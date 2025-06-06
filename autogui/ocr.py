@@ -93,11 +93,13 @@ def GetTargetCenter(points, findStr, word):
     midRatio = (2 * wordIdx + wordLen) / totalLen / 2
     midPoint = wordBox[0] + (wordBox[1]-wordBox[0]) * midRatio
     midPoint += (wordBox[3] - wordBox[0]) / 2
-    return int(midPoint[0]), int(midPoint[1])
+    height = int(np.linalg.norm(wordBox[3] - wordBox[0]))
+    width = int(wordLen / totalLen * np.linalg.norm(wordBox[1] - wordBox[0]))
+    return int(midPoint[0]), int(midPoint[1]), width, height
 
 def FindTextInResult(ocrResult, findStr : str, confidence: float):
     if ocrResult is None:
-        return None, None
+        return None, None, None, None
 
     for line in ocrResult:
         for word_info in line or []:
@@ -106,7 +108,7 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
                 points = word_info[0]
                 return GetTargetCenter(points, findStr, word)
     
-    return None, None
+    return None, None, None, None
     
 def OCR(findStr:str, findRegion=None, confidence:float = 0.8) -> bool:
     if findStr is None:
@@ -118,7 +120,7 @@ def OCR(findStr:str, findRegion=None, confidence:float = 0.8) -> bool:
         cvImg = cvImg[findRegion[1]:findRegion[1] + findRegion[3], findRegion[0]:findRegion[0] + findRegion[2]]
     result = _lazyOcr.getOcr().ocr(cvImg, cls=True)
 
-    xCenter, yCenter = FindTextInResult(result, findStr, confidence)
+    xCenter, yCenter, width, height = FindTextInResult(result, findStr, confidence)
     if xCenter and yCenter and findRegion and len(findRegion) == 4:
         xCenter += findRegion[0]
         yCenter += findRegion[1]
@@ -131,4 +133,4 @@ def OCR(findStr:str, findRegion=None, confidence:float = 0.8) -> bool:
     except AttributeError:
         pass
 
-    return xCenter, yCenter
+    return xCenter, yCenter, width, height

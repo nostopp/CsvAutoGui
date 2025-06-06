@@ -84,7 +84,13 @@ class AutoOperator:
         else:
             if not operateParam:
                 # pyautogui.moveTo(center)
-                pydirectinput.moveTo(center.x, center.y, _pause=False)
+                if not 'pic_range_random' in operation:
+                    pydirectinput.moveTo(center.x, center.y, _pause=False)
+                else:
+                    height, width = img.shape[:2]
+                    startX = center.x - width / 2
+                    startY = center.y - height / 2
+                    pydirectinput.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), _pause=False)
             else:
                 param = operateParam.split(";")
                 if param[0] == 'exist':
@@ -108,7 +114,7 @@ class AutoOperator:
         if self._printLog:
             startTime = time.time()
 
-        xCenter, yCenter = OCR(operation["search_pic"], region, confidence)            
+        xCenter, yCenter, width, height = OCR(operation["search_pic"], region, confidence)            
 
         if xCenter is None or yCenter is None:
             if self._printLog:
@@ -135,7 +141,12 @@ class AutoOperator:
 
             if not operateParam:
                 # pyautogui.moveTo(xCenter, yCenter)
-                pydirectinput.moveTo(xCenter, yCenter, _pause=False)
+                if not 'pic_range_random' in operation:
+                    pydirectinput.moveTo(xCenter, yCenter, _pause=False)
+                else:
+                    startX = xCenter - width / 2
+                    startY = yCenter - height / 2
+                    pydirectinput.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), _pause=False)
             else:
                 param = operateParam.split(";")
                 if param[0] == 'exist':
