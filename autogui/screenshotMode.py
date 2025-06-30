@@ -21,6 +21,8 @@ class ScreenshotMode:
 
         keyboard.add_hotkey('shift+f', self.PressFullScreenshot)
 
+        print('shift+x 将打印当前坐标\nshift+c 将打印当前鼠标位置\nshift+f 将进行全屏截图')
+
     def PressScreenshot(self):
         self._pressShotCount += 1
         pos = pyautogui.position()

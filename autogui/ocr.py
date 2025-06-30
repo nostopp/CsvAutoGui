@@ -8,6 +8,8 @@ import time
 SAVE_OCR_FILE = False
 OCR_FILE_PATH = None
 
+COMPARE_START = ('<;', '<=;', '>;', '>=;', '==;', '!=;')
+
 class LazyPaddleOCR:
     _instance = None
     _importLock = threading.Lock()
@@ -51,7 +53,7 @@ class LazyPaddleOCR:
                 cls_model_dir='ocr_model/cls'
             )
             self._drawOcr = draw_ocr
-            # print("LazyPaddleOCR: OCR engine initialized successfully.")
+            print("OCR初始化完成")
     
     def getOcr(self):
         if not self._startedInit:
@@ -109,7 +111,40 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
                 return GetTargetCenter(points, findStr, word)
     
     return None, None, None, None
-    
+
+def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
+    if ocrResult is None:
+        return None, None, None, None
+
+    compareFunc = None
+    match compare:
+        case '<':
+            compareFunc = lambda a, b: a < b
+        case '<=':
+            compareFunc = lambda a, b: a <= b
+        case '>':
+            compareFunc = lambda a, b: a > b
+        case '>=':
+            compareFunc = lambda a, b: a >= b
+        case '==':
+            compareFunc = lambda a, b: a == b
+        case '!=':
+            compareFunc = lambda a, b: a != b
+
+    for line in ocrResult:
+        for word_info in line or []:
+            word, conf = word_info[1]
+            if word.isdigit() and conf >= confidence and compareFunc(float(word), float(findStr)):
+                points = word_info[0]
+                wordBox = np.array(points)
+                midPoint = wordBox[0] + (wordBox[1]-wordBox[0]) * 0.5
+                midPoint += (wordBox[3] - wordBox[0]) / 2
+                height = int(np.linalg.norm(wordBox[3] - wordBox[0]))
+                width = int(np.linalg.norm(wordBox[1] - wordBox[0]))
+                return midPoint[0], midPoint[1], width, height
+
+    return None, None, None, None
+
 def OCR(findStr:str, findRegion=None, confidence:float = 0.8) -> bool:
     if findStr is None:
         return
@@ -120,7 +155,14 @@ def OCR(findStr:str, findRegion=None, confidence:float = 0.8) -> bool:
         cvImg = cvImg[findRegion[1]:findRegion[1] + findRegion[3], findRegion[0]:findRegion[0] + findRegion[2]]
     result = _lazyOcr.getOcr().ocr(cvImg, cls=True)
 
-    xCenter, yCenter, width, height = FindTextInResult(result, findStr, confidence)
+    if findStr.startswith(COMPARE_START):
+        split = findStr.split(';')
+        compare = split[0]
+        targetStr = split[1]
+        xCenter, yCenter, width, height = CompareNumInResult(result, targetStr, confidence, compare)
+    else:
+        xCenter, yCenter, width, height = FindTextInResult(result, findStr, confidence)
+
     if xCenter and yCenter and findRegion and len(findRegion) == 4:
         xCenter += findRegion[0]
         yCenter += findRegion[1]

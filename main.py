@@ -29,6 +29,7 @@ if __name__ == "__main__":
         global KEEP_RUN
         KEEP_RUN = False
     keyboard.add_hotkey('shift+ctrl+x', exit)
+    print("按下 Shift + Ctrl + X 退出程序")
 
     if SCREENSHOT_MODE:
         mainOperator = autogui.ScreenshotMode()
