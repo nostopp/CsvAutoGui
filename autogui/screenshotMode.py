@@ -21,7 +21,7 @@ class ScreenshotMode:
 
         keyboard.add_hotkey('shift+f', self.PressFullScreenshot)
 
-        print('shift+x 将打印当前坐标\nshift+c 将打印当前鼠标位置\nshift+f 将进行全屏截图')
+        print('shift+c 将打印当前鼠标位置\nshift+x 将记录先后两次鼠标位置并截图该区域\nshift+f 将进行全屏截图')
 
     def PressScreenshot(self):
         self._pressShotCount += 1
