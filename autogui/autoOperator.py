@@ -55,7 +55,11 @@ class AutoOperator:
             confidence = 0.8 if not "confidence" in operation else operation['confidence']
             region = None if not 'pic_region' in operation else operation['pic_region']
 
-            img = ScaleHelper.Instance().getScaleImg(f'{self._configPath}/{operation["search_pic"]}')
+            if not 'search_pic_cache' in operation:
+                img = ScaleHelper.Instance().getScaleImg(f'{self._configPath}/{operation["search_pic"]}')
+                operation['search_pic_cache'] = img
+            else:
+                img = operation['search_pic_cache']
             center = pyautogui.locateCenterOnScreen(img, confidence=confidence, region=region)            
 
             if self._printLog:
