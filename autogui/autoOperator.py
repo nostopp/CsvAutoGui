@@ -65,13 +65,11 @@ class AutoOperator:
                 print(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
             
             if operateParam:
-                param = operateParam.split(";")
-
-                match param[0]:
+                match operateParam[0]:
                     case 'notExist':
                         if self._printLog:
-                            print(f'启动配置 {param[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                            print(f'启动配置 {operateParam[1]}')
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
 
                         return None, lambda x : x, None
 
@@ -92,11 +90,10 @@ class AutoOperator:
                     startY = center.y - height / 2
                     pydirectinput.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), _pause=False)
             else:
-                param = operateParam.split(";")
-                if param[0] == 'exist':
+                if operateParam[0] == 'exist':
                     if self._printLog:
-                        print(f'启动配置 {param[1]}')
-                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                        print(f'启动配置 {operateParam[1]}')
+                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
                     
                     return None, lambda x : x, None
 
@@ -121,13 +118,11 @@ class AutoOperator:
                 print(f'ocr {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
 
             if operateParam:
-                param = operateParam.split(";")
-
-                match param[0]:
+                match operateParam[0]:
                     case 'notExist':
                         if self._printLog:
-                            print(f'启动配置 {param[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                            print(f'启动配置 {operateParam[1]}')
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
 
                         return None, lambda x : x, None
 
@@ -148,11 +143,10 @@ class AutoOperator:
                     startY = yCenter - height / 2
                     pydirectinput.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), _pause=False)
             else:
-                param = operateParam.split(";")
-                if param[0] == 'exist':
+                if operateParam[0] == 'exist':
                     if self._printLog:
-                        print(f'启动配置 {param[1]}')
-                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, param[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                        print(f'启动配置 {operateParam[1]}')
+                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
                     
                     return None, lambda x : x, None
 
@@ -169,55 +163,41 @@ class AutoOperator:
             match operation['operate']:
                 case 'click':
                     if operateParam:
-                        # pyautogui.click(button=operateParam)
                         pydirectinput.click(button=operateParam, _pause=False)
                     else:
-                        # pyautogui.click()                    
                         pydirectinput.click(_pause=False)
                 case 'mDown':
                     if operateParam:
-                        # pyautogui.mouseDown(button=operateParam)
                         pydirectinput.mouseDown(button=operateParam, _pause=False)
                     else:
-                        # pyautogui.mouseDown()                                        
                         pydirectinput.mouseDown(_pause=False)                                        
                 case 'mUp':
                     if operateParam:
-                        # pyautogui.mouseUp(button=operateParam)
                         pydirectinput.mouseUp(button=operateParam, _pause=False)
                     else:
-                        # pyautogui.mouseUp()                                       
                         pydirectinput.mouseUp(_pause=False)                                       
                 case 'mMove':
                     if operateParam:
-                        offset = operateParam.split(";")
-                        # pyautogui.moveRel(xOffset=float(offset[0]), yOffset=float(offset[1]))
-                        pydirectinput.moveRel(xOffset=ScaleHelper.Instance().getScaleInt(int(offset[0])), yOffset=ScaleHelper.Instance().getScaleInt(int(offset[1])), _pause=False)
+                        pydirectinput.moveRel(xOffset=operateParam[0], yOffset=operateParam[1], _pause=False)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'mMoveTo':
                     if operateParam:
-                        offset = operateParam.split(";")
-                        # pyautogui.moveTo(x=float(offset[0]), y=float(offset[1]))
-                        pos = ScaleHelper.Instance().getScalePos((int(offset[0]), int(offset[1])))
-                        pydirectinput.moveTo(x=pos[0], y=pos[1], _pause=False)
+                        pydirectinput.moveTo(x=operateParam[0], y=operateParam[1], _pause=False)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'press':
                     if operateParam:
-                        # pyautogui.press(operateParam)
                         pydirectinput.press(operateParam, _pause=False)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'kDown':
                     if operateParam:
-                        # pyautogui.keyDown(operateParam)
                         pydirectinput.keyDown(operateParam, _pause=False)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'kUp':
                     if operateParam:
-                        # pyautogui.keyUp(operateParam)
                         pydirectinput.keyUp(operateParam, _pause=False)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")

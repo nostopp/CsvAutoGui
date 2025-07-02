@@ -13,6 +13,21 @@ def GetCsv(path:str, fileName:str = "main.csv") -> dict:
     csvDataDict[fileName] = ParseCsv(path, fileName)
     return csvDataDict[fileName]
 
+def ParseParamData(param:str, operate:str):
+    param_data = None
+    match operate:
+        case 'click' | 'mDown' | 'mUp' | 'press' | 'kDown' | 'kUp' | 'write':
+            param_data = param
+        case 'pic' | 'ocr':
+            param_data = param.split(";")
+        case 'mMove' | 'mMoveTo':
+            data = param.split(";")
+            xOffset=ScaleHelper.Instance().getScaleInt(int(data[0])) 
+            yOffset=ScaleHelper.Instance().getScaleInt(int(data[1]))
+            param_data = [xOffset, yOffset]
+
+    return param_data
+
 def ParseCsv(path:str, fileName:str) -> dict:
     dataDict = dict()
     with open(f'{path}/{fileName}', mode='r', encoding='utf-8') as csvfile:
@@ -25,7 +40,7 @@ def ParseCsv(path:str, fileName:str) -> dict:
             value['index'] = key
             value['operate'] = row['操作']
             if CheckValueInCsv(row, '操作参数'):
-                value['operate_param'] = row['操作参数']
+                value['operate_param'] = ParseParamData(row['操作参数'], value['operate'])
             if CheckValueInCsv(row, '图片/ocr名称'):
                 value['search_pic'] = row['图片/ocr名称']
             if CheckValueInCsv(row, '图片/ocr坐标范围'):
