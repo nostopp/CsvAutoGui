@@ -66,6 +66,8 @@ def ParseCsv(path:str, fileName:str) -> dict:
             if CheckValueInCsv(row, '图片/ocr定位移动随机'):
                 if int(row['图片/ocr定位移动随机']) == 1:
                     value['pic_range_random'] = True
+            if CheckValueInCsv(row, '移动操作用时'):
+                value['move_time'] = float(row['移动操作用时'])
             # 将键值对添加到字典中
             dataDict[key] = value
         return dataDict

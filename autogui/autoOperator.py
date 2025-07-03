@@ -3,9 +3,49 @@ import pydirectinput
 import pyperclip
 import time
 import random
+import numpy as np
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
+
+MOVE_FPS = 60
+MOVE_INTERVAL = 1/MOVE_FPS
+
+def continueMoveTo(start:np.array, end:np.array, duration):
+    steps = max(1, int(duration * MOVE_FPS))
+    delta = end - start
+    start_time = time.perf_counter()
+    for i in range(steps):
+        t = (i + 1) / steps
+        x = int(start[0] + delta[0] * t)
+        y = int(start[1] + delta[1] * t)
+        pydirectinput.moveTo(x, y, _pause=False)
+        next_frame_time = start_time + (i + 1) * MOVE_INTERVAL
+        now = time.perf_counter()
+        sleep_time = next_frame_time - now
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+    # 最后确保到达终点
+    # pydirectinput.moveTo(int(end[0]), int(end[1]), _pause=False)
+
+def moveTo(x, y, duration=None):
+    if not duration:
+        pydirectinput.moveTo(x, y, _pause=False)
+        return
+
+    start = np.array(pydirectinput.position())
+    end = np.array([x, y])
+    continueMoveTo(start, end, duration)
+
+def moveRel(xOffset, yOffset, duration=None):
+    if not duration:
+        pydirectinput.moveRel(xOffset, yOffset, _pause=False)
+        return
+
+    start = np.array(pydirectinput.position())
+    end = start + np.array([xOffset, yOffset])
+    continueMoveTo(start, end, duration)
+
 
 class AutoOperator:
     def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, loop : bool = False, printLog : bool = False):
@@ -85,14 +125,13 @@ class AutoOperator:
             raise e
         else:
             if not operateParam:
-                # pyautogui.moveTo(center)
                 if not 'pic_range_random' in operation:
-                    pydirectinput.moveTo(center.x, center.y, _pause=False)
+                    moveTo(center.x, center.y, operation.get('move_time', None))
                 else:
                     height, width = img.shape[:2]
                     startX = center.x - width / 2
                     startY = center.y - height / 2
-                    pydirectinput.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), _pause=False)
+                    moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
             else:
                 if operateParam[0] == 'exist':
                     if self._printLog:
@@ -139,13 +178,12 @@ class AutoOperator:
                 print(f'ocr {operation["search_pic"]}, 用时: {time.time()-startTime:.2f}, 位置: {xCenter},{yCenter}')
 
             if not operateParam:
-                # pyautogui.moveTo(xCenter, yCenter)
                 if not 'pic_range_random' in operation:
-                    pydirectinput.moveTo(xCenter, yCenter, _pause=False)
+                    moveTo(xCenter, yCenter, operation.get('move_time', None))
                 else:
                     startX = xCenter - width / 2
                     startY = yCenter - height / 2
-                    pydirectinput.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), _pause=False)
+                    moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
             else:
                 if operateParam[0] == 'exist':
                     if self._printLog:
@@ -182,12 +220,12 @@ class AutoOperator:
                         pydirectinput.mouseUp(_pause=False)                                       
                 case 'mMove':
                     if operateParam:
-                        pydirectinput.moveRel(xOffset=operateParam[0], yOffset=operateParam[1], _pause=False)
+                        moveRel(operateParam[0], operateParam[1], operation.get('move_time', None))
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'mMoveTo':
                     if operateParam:
-                        pydirectinput.moveTo(x=operateParam[0], y=operateParam[1], _pause=False)
+                        moveTo(operateParam[0], operateParam[1], operation.get('move_time', None))
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'press':
