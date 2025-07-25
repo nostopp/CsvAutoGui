@@ -63,16 +63,21 @@ class AutoOperator:
         operation = self._operateDict[self._operateIndex]
 
         operationWait, indexChangeFunc, operationWaitRandom = self.Operate(operation)
+        waitTime = 0
         if operationWait and operationWait > 0:
             if not operationWaitRandom:
-                time.sleep(operationWait)
+                waitTime = operationWait
             else:
-                time.sleep(operationWait + random.random()*operationWaitRandom)
+                waitTime = operationWait + random.random()*operationWaitRandom
         elif 'wait' in operation:
             if 'wait_random' in operation:
-                time.sleep(operation['wait'] + random.random()*operation['wait_random'])
+                waitTime = operation['wait'] + random.random()*operation['wait_random']
             else:
-                time.sleep(operation['wait'])
+                waitTime = operation['wait']
+        if waitTime > 0:
+            if self._printLog:
+                print(f'等待 {waitTime} s')
+            time.sleep(waitTime)
 
         if indexChangeFunc:
             self._operateIndex = indexChangeFunc(self._operateIndex)
