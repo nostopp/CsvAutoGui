@@ -12,6 +12,7 @@ dependencies = [
     "pillow>=11.1.0",
     "pyautogui>=0.9.54",
     "pydirectinput>=1.0.4",
+    "pywin32>=311",
     "setuptools>=78.1.0",
 ]
 

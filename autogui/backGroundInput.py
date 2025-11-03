@@ -6,7 +6,9 @@ import time
 import ctypes
 import numpy as np
 import cv2
-import pydirectinput
+import pyautogui
+import pyscreeze
+from .baseInput import BaseInput
 
 # https://docs.microsoft.com/zh/windows/win32/inputdev/virtual-key-codes
 # key的wparam就是vkcode
@@ -93,7 +95,7 @@ MwParam = {
 }
 PRESS_TIME = 0.05
 
-class BackGroundInput:
+class BackGroundInput(BaseInput):
     def __init__(self, window_title: str):
         self._window_title = window_title
         hwnd = win32gui.FindWindow(None, window_title)  # 获取窗口句柄
@@ -112,6 +114,16 @@ class BackGroundInput:
         else:
             print(f"未找到窗口: {window_title}")
             return None
+
+    def locateCenterOnScreen(self, img, **kwargs):
+        try:
+            screenshotIm = self.screenShot()
+            retVal = pyautogui.locate(img, screenshotIm, **kwargs)
+
+            if retVal:
+                return retVal
+        except pyscreeze.ImageNotFoundException:
+            raise
 
     def screenShot(self):
         # 获取设备上下文
@@ -151,14 +163,14 @@ class BackGroundInput:
     def activate(self):
         win32gui.PostMessage(self.hwnd, win32con.WM_ACTIVATE, win32con.WA_ACTIVE, 0)
 
-    def moveTo(self, x, y):
+    def moveTo(self, x, y, duration=0.0):
         wparam = 0
         lparam = y << 16 | x
         self._mouse_x = x
         self._mouse_y = y
         win32gui.PostMessage(self._hwnd, WmCode['mouse_move'], wparam, lparam)
 
-    def moveRel(self):
+    def moveRel(self, xOffset, yOffset, duration=None):
         pass
 
     def click(self, button: str):

@@ -10,12 +10,14 @@ parser.add_argument("-s", "--screenshots", action="store_true", help="截图模�
 parser.add_argument("--scale", help="与配置所用分辨率的缩放值", default=1.0, type=float)
 parser.add_argument("--scale_image", help="缩放时是否缩放用到的截图", default=False, type=bool)
 parser.add_argument("--offset", help="搜索时需要的偏移值", default="0;0", type=str)
+parser.add_argument("-t", "--title", help="目标窗口名称", default=None, type=str)
 args = parser.parse_args()
 
 CONFIG_PATH = args.config
 LOOP = args.loop
 PRINT_LOG = args.log
 SCREENSHOT_MODE = args.screenshots
+TITLE = args.title
 print(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 截图模式: {args.screenshots}")
 
 autogui.ScaleHelper.Instance().Init(args.scale, args.offset, args.scale_image)
@@ -36,8 +38,13 @@ if __name__ == "__main__":
         while KEEP_RUN:
             mainOperator.Update()
     else:
+        # if not TITLE:
+        input = autogui.FrontGroundInput()
+        # else:
+        #     input = autogui.BackGroundInput(TITLE)
+        
         subOperatorList : list[autogui.AutoOperator]= [] 
-        mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH), CONFIG_PATH, subOperatorList, LOOP, PRINT_LOG)
+        mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH), CONFIG_PATH, subOperatorList, input, LOOP, PRINT_LOG)
 
         while KEEP_RUN:
             if len(subOperatorList) > 0:

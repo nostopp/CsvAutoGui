@@ -7,52 +7,15 @@ import numpy as np
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
-
-MOVE_FPS = 60
-MOVE_INTERVAL = 1/MOVE_FPS
-
-def continueMoveTo(start:np.array, end:np.array, duration):
-    steps = max(1, int(duration * MOVE_FPS))
-    delta = end - start
-    start_time = time.perf_counter()
-    for i in range(steps):
-        t = (i + 1) / steps
-        x = int(start[0] + delta[0] * t)
-        y = int(start[1] + delta[1] * t)
-        pydirectinput.moveTo(x, y, _pause=False)
-        next_frame_time = start_time + (i + 1) * MOVE_INTERVAL
-        now = time.perf_counter()
-        sleep_time = next_frame_time - now
-        if sleep_time > 0:
-            time.sleep(sleep_time)
-    # 最后确保到达终点
-    # pydirectinput.moveTo(int(end[0]), int(end[1]), _pause=False)
-
-def moveTo(x, y, duration=None):
-    if not duration:
-        pydirectinput.moveTo(x, y, _pause=False)
-        return
-
-    start = np.array(pydirectinput.position())
-    end = np.array([x, y])
-    continueMoveTo(start, end, duration)
-
-def moveRel(xOffset, yOffset, duration=None):
-    if not duration:
-        pydirectinput.moveRel(xOffset, yOffset, _pause=False)
-        return
-
-    start = np.array(pydirectinput.position())
-    end = start + np.array([xOffset, yOffset])
-    continueMoveTo(start, end, duration)
-
+from .baseInput import BaseInput
 
 class AutoOperator:
-    def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, loop : bool = False, printLog : bool = False):
+    def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, input:BaseInput, loop : bool = False, printLog : bool = False):
         self._operateDict = operateDict
         self._operateIndex = 1
         self._configPath = configPath
         self._subOperatorList = subOperatorList
+        self._input = input
         self._loop = loop
         self._printLog = printLog
 
@@ -105,7 +68,7 @@ class AutoOperator:
                 operation['search_pic_cache'] = img
             else:
                 img = operation['search_pic_cache']
-            center = pyautogui.locateCenterOnScreen(img, confidence=confidence, region=region)            
+            center = self._input.locateCenterOnScreen(img, confidence=confidence, region=region)            
 
             if self._printLog:
                 print(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}')
@@ -131,12 +94,12 @@ class AutoOperator:
         else:
             if not operateParam:
                 if not 'pic_range_random' in operation:
-                    moveTo(center.x, center.y, operation.get('move_time', None))
+                    self._input.moveTo(center.x, center.y, operation.get('move_time', None))
                 else:
                     height, width = img.shape[:2]
                     startX = center.x - width / 2
                     startY = center.y - height / 2
-                    moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
+                    self._input.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
             else:
                 if operateParam[0] == 'exist':
                     if self._printLog:
@@ -184,11 +147,11 @@ class AutoOperator:
 
             if not operateParam:
                 if not 'pic_range_random' in operation:
-                    moveTo(xCenter, yCenter, operation.get('move_time', None))
+                    self._input.moveTo(xCenter, yCenter, operation.get('move_time', None))
                 else:
                     startX = xCenter - width / 2
                     startY = yCenter - height / 2
-                    moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
+                    self._input.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
             else:
                 if operateParam[0] == 'exist':
                     if self._printLog:
@@ -210,48 +173,48 @@ class AutoOperator:
             match operation['operate']:
                 case 'click':
                     if operateParam:
-                        pydirectinput.click(button=operateParam, _pause=False)
+                        self._input.click(button=operateParam)
                     else:
-                        pydirectinput.click(_pause=False)
+                        self._input.click()
                 case 'mDown':
                     if operateParam:
-                        pydirectinput.mouseDown(button=operateParam, _pause=False)
+                        self._input.mouseDown(button=operateParam)
                     else:
-                        pydirectinput.mouseDown(_pause=False)                                        
+                        self._input.mouseDown()
                 case 'mUp':
                     if operateParam:
-                        pydirectinput.mouseUp(button=operateParam, _pause=False)
+                        self._input.mouseUp(button=operateParam)
                     else:
-                        pydirectinput.mouseUp(_pause=False)                                       
+                        self._input.mouseUp()
                 case 'mMove':
                     if operateParam:
-                        moveRel(operateParam[0], operateParam[1], operation.get('move_time', None))
+                        self._input.moveRel(operateParam[0], operateParam[1], operation.get('move_time', None))
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'mMoveTo':
                     if operateParam:
-                        moveTo(operateParam[0], operateParam[1], operation.get('move_time', None))
+                        self._input.moveTo(operateParam[0], operateParam[1], operation.get('move_time', None))
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'press':
                     if operateParam:
-                        pydirectinput.press(operateParam, _pause=False)
+                        self._input.press(operateParam)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'kDown':
                     if operateParam:
-                        pydirectinput.keyDown(operateParam, _pause=False)
+                        self._input.keyDown(operateParam)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'kUp':
                     if operateParam:
-                        pydirectinput.keyUp(operateParam, _pause=False)
+                        self._input.keyUp(operateParam)
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'write':
                     if operateParam:
                         pyperclip.copy(operateParam)
-                        pyautogui.hotkey('ctrl', 'v')
+                        self._input.hotkey('ctrl', 'v')
                     else:
                         raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
                 case 'pic':

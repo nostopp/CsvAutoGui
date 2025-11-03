@@ -4,6 +4,7 @@ import os
 import keyboard
 import pyautogui
 import winsound
+import win32con
 
 screenshotDir = 'screenshot'
 
@@ -37,8 +38,8 @@ class ScreenshotMode:
             import ctypes
         except:
             return
-        pos1 = (ctypes.windll.user32.GetSystemMetrics(76), ctypes.windll.user32.GetSystemMetrics(77))
-        pos2 = (ctypes.windll.user32.GetSystemMetrics(76) + ctypes.windll.user32.GetSystemMetrics(78), ctypes.windll.user32.GetSystemMetrics(77) + ctypes.windll.user32.GetSystemMetrics(79))
+        pos1 = (ctypes.windll.user32.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN), ctypes.windll.user32.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN))
+        pos2 = (ctypes.windll.user32.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN) + ctypes.windll.user32.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN), ctypes.windll.user32.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN) + ctypes.windll.user32.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN))
         self.Screenshot(pos1, pos2)
 
     def Screenshot(self, pos1, pos2):
