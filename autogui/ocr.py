@@ -4,6 +4,7 @@ import pyautogui
 import cv2
 import numpy as np
 import time
+from .baseInput import BaseInput
 
 SAVE_OCR_FILE = False
 OCR_FILE_PATH = None
@@ -145,13 +146,15 @@ def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
 
     return None, None, None, None
 
-def OCR(findStr:str, findRegion=None, confidence:float = 0.8) -> bool:
+def OCR(findStr:str, input:BaseInput, findRegion=None, confidence:float = 0.8) -> bool:
     if findStr is None:
         return
-    screenshotIm = pyautogui.screenshot()
-    cvImg = np.array(screenshotIm.convert('RGB'))
-    cvImg = cv2.cvtColor(cvImg, cv2.COLOR_RGB2GRAY)
+    # screenshotIm = pyautogui.screenshot()
+    # cvImg = np.array(screenshotIm.convert('RGB'))
+    screenshotIm = input.screenShot()
+    cvImg = cv2.cvtColor(screenshotIm, cv2.COLOR_BGR2GRAY)
     if findRegion and len(findRegion) == 4:
+        findRegion = input.convertFindRegion(findRegion)
         cvImg = cvImg[findRegion[1]:findRegion[1] + findRegion[3], findRegion[0]:findRegion[0] + findRegion[2]]
     result = _lazyOcr.getOcr().ocr(cvImg, cls=True)
 

@@ -2,6 +2,7 @@ import time
 import pyautogui
 import pydirectinput
 import numpy as np
+import cv2
 from .baseInput import BaseInput
 
 MOVE_FPS = 60
@@ -13,6 +14,11 @@ class FrontGroundInput(BaseInput):
 
     def locateCenterOnScreen(self, image, **kwargs):
         return pyautogui.locateCenterOnScreen(image, **kwargs)
+
+    def screenShot(self):
+        screenShot = pyautogui.screenshot()
+        img = np.array(screenShot)
+        return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
     def hotkey(self, *args, **kwargs):
         pyautogui.hotkey(*args, **kwargs)

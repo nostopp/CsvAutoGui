@@ -122,7 +122,7 @@ class AutoOperator:
         if self._printLog:
             startTime = time.time()
 
-        xCenter, yCenter, width, height = OCR(operation["search_pic"], region, confidence)            
+        xCenter, yCenter, width, height = OCR(operation["search_pic"], self._input, region, confidence)            
 
         if xCenter is None or yCenter is None:
             if self._printLog:

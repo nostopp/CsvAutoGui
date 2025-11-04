@@ -7,6 +7,10 @@ class BaseInput:
         pass
     def locateCenterOnScreen(self, image, **kwargs) -> Point:
         return Point(100, 100)
+    def convertFindRegion(self, region):
+        return region
+    def screenShot(self):
+        pass
     def hotkey(self, *args, **kwargs):
         pass
     def moveTo(self, x, y, duration=0.0):
