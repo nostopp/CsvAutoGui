@@ -57,12 +57,12 @@ def getProcessName():
     for window in all_windows:
         print(f"HWND: {window['hwnd']}, PID: {window['pid']}, 类名: {window['class']}, 标题: '{window['title']}'")
 
+KEEP_RUN = True
 def main():
     if GET_PROCESS:
         getProcessName()
         return
 
-    KEEP_RUN = True
     def exit():
         global KEEP_RUN
         KEEP_RUN = False
