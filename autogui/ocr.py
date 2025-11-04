@@ -51,7 +51,8 @@ class LazyPaddleOCR:
                 use_angle_cls=True, lang='ch', show_log=False,
                 det_model_dir='ocr_model/det', 
                 rec_model_dir='ocr_model/rec',
-                cls_model_dir='ocr_model/cls'
+                cls_model_dir='ocr_model/cls',
+                use_gpu = True,
             )
             self._drawOcr = draw_ocr
             print("OCR初始化完成")
