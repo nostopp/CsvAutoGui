@@ -1,3 +1,4 @@
+import string
 import win32gui
 import win32ui
 import win32api
@@ -93,7 +94,7 @@ MwParam = {
     "x1": 0x0001,  # 侧键后退按钮
     "x2": 0x0002,  # 侧键前进按钮
 }
-PRESS_TIME = 0.05
+PRESS_TIME = 0.02
 
 class BackGroundInput(BaseInput):
     def __init__(self, window_title: str):
@@ -102,12 +103,20 @@ class BackGroundInput(BaseInput):
         if hwnd:
             self._hwnd = hwnd
             
-            left, top, right, bottom = win32gui.GetWindowRect(self._hwnd)
+            left, top, right, bottom = win32gui.GetClientRect(self._hwnd)
+            window_left, window_top, window_right, window_bottom = win32gui.GetWindowRect(self._hwnd)
             self._width = right - left
             self._height = bottom - top
+            self._window_left = window_left
+            self._window_top = window_top
+            self._window_width = window_right - window_left
+            self._window_height = window_bottom - window_top
             self._screen_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
             self._screen_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
-            self._is_fullscreen = (self._width == self._screen_width and self._height == self._screen_height)
+            self._is_fullscreen = (self._window_width == self._screen_width and self._window_height == self._screen_height)
+            if not self._is_fullscreen:
+                self._window_left += 8
+                self._window_top += 8
 
             self._mouse_x = self._screen_width // 2
             self._mouse_y = self._screen_height // 2
@@ -117,15 +126,25 @@ class BackGroundInput(BaseInput):
 
     def locateCenterOnScreen(self, img, **kwargs):
         try:
+            # self.activate()
             screenshotIm = self.screenShot()
+            if 'region' in kwargs:
+                region = kwargs['region']
+                region = (region[0] - self._window_left, region[1] - self._window_top, region[2], region[3])
+                kwargs['region'] = region
+
+                crop_image = screenshotIm[region[1] : region[1] + region[3], region[0] : region[0] + region[2]]
+                # cv2.imwrite('screenshot_crop.png', crop_image)
             retVal = pyautogui.locate(img, screenshotIm, **kwargs)
 
             if retVal:
-                return retVal
+                return pyautogui.center(retVal)
         except pyscreeze.ImageNotFoundException:
             raise
 
     def screenShot(self):
+        # win32gui.SetForegroundWindow(self._hwnd)
+        # time.sleep(0.1)  # 给窗口一些时间响应
         # 获取设备上下文
         hwnd_dc = win32gui.GetWindowDC(self._hwnd)
         mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
@@ -133,7 +152,7 @@ class BackGroundInput(BaseInput):
 
         # 创建位图对象
         bitmap = win32ui.CreateBitmap()
-        bitmap.CreateCompatibleBitmap(mfc_dc, self._width, self._height)
+        bitmap.CreateCompatibleBitmap(mfc_dc, self._window_width, self._window_height)
         save_dc.SelectObject(bitmap)
 
         # 进行截图
@@ -154,14 +173,14 @@ class BackGroundInput(BaseInput):
         # OpenCV 处理
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
         #全屏处理
-        # if not self._is_fullscreen:
-        #     img = img[40:-9, 9:-9, :]
+        if not self._is_fullscreen:
+            img = img[8:-8, 8:-8, :]
 
         # cv2.imwrite('screenshot.png', img)
         return img
 
     def activate(self):
-        win32gui.PostMessage(self.hwnd, win32con.WM_ACTIVATE, win32con.WA_ACTIVE, 0)
+        win32gui.PostMessage(self._hwnd, win32con.WM_ACTIVATE, win32con.WA_ACTIVE, 0)
 
     def moveTo(self, x, y, duration=0.0):
         wparam = 0
@@ -174,6 +193,7 @@ class BackGroundInput(BaseInput):
         pass
 
     def click(self, button: str):
+        # self.activate()
         self.mouseDown(button)
         time.sleep(PRESS_TIME)
         self.mouseUp(button)
@@ -184,7 +204,7 @@ class BackGroundInput(BaseInput):
             wparam = MwParam[button]
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_down"]
-        win32gui.PostMessage(self.hwnd, message, wparam, lparam)
+        win32gui.PostMessage(self._hwnd, message, wparam, int(lparam))
 
     def mouseUp(self, button: str):
         wparam = 0
@@ -192,13 +212,34 @@ class BackGroundInput(BaseInput):
             wparam = MwParam[button]
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_up"]
-        win32gui.PostMessage(self.hwnd, message, wparam, lparam)
+        win32gui.PostMessage(self._hwnd, message, wparam, lparam)
 
-    def press(self):
-        pass
+    def virtualKeyCode(self, key: str):
+        # 获取打印字符
+        if len(key) == 1 and key in string.printable:
+            # https://docs.microsoft.com/zh/windows/win32/api/winuser/nf-winuser-vkkeyscana
+            return ctypes.windll.user32.VkKeyScanA(ord(key)) & 0xff
+        # 获取控制字符
+        else:
+            return VkCode[key]
 
-    def keyDown(self):
-        pass
+    def press(self, key: str):
+        self.keyDown(key)
+        time.sleep(PRESS_TIME)
+        self.keyUp(key)
 
-    def keyUp(self):
-        pass
+    def keyDown(self, key: str):
+        vk_code = self.virtualKeyCode(key)
+        scan_code = ctypes.windll.user32.MapVirtualKeyW(vk_code, 0)
+        # https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
+        wparam = vk_code
+        lparam = (scan_code << 16) | 1
+        win32gui.PostMessage(self._hwnd, WmCode["key_down"], wparam, lparam)
+
+    def keyUp(self, key: str):
+        vk_code = self.virtualKeyCode(key)
+        scan_code = ctypes.windll.user32.MapVirtualKeyW(vk_code, 0)
+        # https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
+        wparam = vk_code
+        lparam = (scan_code << 16) | 1
+        win32gui.PostMessage(self._hwnd, WmCode["key_up"], wparam, lparam)

@@ -38,10 +38,10 @@ if __name__ == "__main__":
         while KEEP_RUN:
             mainOperator.Update()
     else:
-        # if not TITLE:
-        input = autogui.FrontGroundInput()
-        # else:
-        #     input = autogui.BackGroundInput(TITLE)
+        if not TITLE:
+            input = autogui.FrontGroundInput()
+        else:
+            input = autogui.BackGroundInput(TITLE)
         
         subOperatorList : list[autogui.AutoOperator]= [] 
         mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH), CONFIG_PATH, subOperatorList, input, LOOP, PRINT_LOG)
