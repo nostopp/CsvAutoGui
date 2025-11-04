@@ -95,6 +95,8 @@ MwParam = {
     "x2": 0x0002,  # 侧键前进按钮
 }
 PRESS_TIME = 0.02
+SAVE_SCREENSHOT_PATH = None
+SAVE_SCREENSHOT = False
 
 class BackGroundInput(BaseInput):
     def __init__(self, window_title: str):
@@ -134,7 +136,8 @@ class BackGroundInput(BaseInput):
                 kwargs['region'] = region
 
                 crop_image = screenshotIm[region[1] : region[1] + region[3], region[0] : region[0] + region[2]]
-                # cv2.imwrite('screenshot_crop.png', crop_image)
+                if SAVE_SCREENSHOT:
+                    self.SaveScreenshot('screenshot_crop', crop_image)
             retVal = pyautogui.locate(img, screenshotIm, **kwargs)
 
             if retVal:
@@ -176,7 +179,8 @@ class BackGroundInput(BaseInput):
         if not self._is_fullscreen:
             img = img[8:-8, 8:-8, :]
 
-        # cv2.imwrite('screenshot.png', img)
+        if SAVE_SCREENSHOT:
+            self.SaveScreenshot('screenshot', img)
         return img
 
     def activate(self):
@@ -243,3 +247,6 @@ class BackGroundInput(BaseInput):
         wparam = vk_code
         lparam = (scan_code << 16) | 1
         win32gui.PostMessage(self._hwnd, WmCode["key_up"], wparam, lparam)
+
+    def SaveScreenshot(self, fileName: str, img):
+        cv2.imwrite(f'{SAVE_SCREENSHOT_PATH}/{fileName}-{time.strftime("%m%d%H%M%S", time.localtime())}.png', img)

@@ -82,7 +82,7 @@ def SaveOCRFile(ocrResult, cvImg):
     scores = [detec[1][1] for line in ocrResult for detec in line or {}]
     visualized_image = _lazyOcr.drawOcr(image, boxes, texts, scores)
 
-    cv2.imwrite(f'{OCR_FILE_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.jpg', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(f'{OCR_FILE_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.png', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
 
 def GetTargetCenter(points, findStr, word):
     wordBox = np.array(points)  # 文本框四个点坐标

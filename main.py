@@ -22,6 +22,8 @@ print(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {
 
 autogui.ScaleHelper.Instance().Init(args.scale, args.offset, args.scale_image)
 
+if autogui.backGroundInput.SAVE_SCREENSHOT:
+    autogui.backGroundInput.SAVE_SCREENSHOT_PATH = CONFIG_PATH
 if autogui.ocr.SAVE_OCR_FILE:
     autogui.ocr.OCR_FILE_PATH = CONFIG_PATH
 
