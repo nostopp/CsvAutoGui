@@ -1,3 +1,4 @@
+import winsound
 import pyautogui
 import pydirectinput
 import pyperclip
@@ -221,6 +222,10 @@ class AutoOperator:
                     operationWait, indexChangeFunc, operationWaitRandom = self.SearchPic(operation)
                 case 'ocr':
                     operationWait, indexChangeFunc, operationWaitRandom = self.Ocr(operation)
+                case 'notify':
+                    #todo 用通知实现
+                    winsound.Beep(200, 500)
+                    winsound.Beep(200, 500)
                 case 'end':
                     indexChangeFunc = lambda x : len(self._operateDict) + 1
 

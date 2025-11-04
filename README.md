@@ -28,6 +28,7 @@
 | --scale | 运行分辨率与配置分辨率的比值 | 1 |
 | --scale_image | 缩放时是否缩放用到的截图 | False |
 | --offset | 运行时对涉及到的绝对坐标进行偏移 | 0;0 |
+| --process | 获取所有可见窗口名称 | False |
 
 - **终止程序**：按 `Ctrl+Shift+X`
 
@@ -73,6 +74,7 @@
 | write | text | 键盘输入（参数必须） |
 | pic | exist;fileName.csv / notExist;fileName.csv | 识图 |
 | ocr | exist;fileName.csv / notExist;fileName.csv | OCR 识别 |
+| notify | text | 通知(当前text不生效,用系统提示音来替代) |
 | end |   | 终止该 CSV 的继续执行 |
 
 ---
