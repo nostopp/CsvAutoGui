@@ -48,9 +48,9 @@ class LazyPaddleOCR:
                 LazyPaddleOCR._importPaddleocr()  # 触发导入
             self._ocrEngine = PaddleOCR(
                 # lang='ch',
-                text_detection_model_name="PP-OCRv5_mobile_det",
+                text_detection_model_name="PP-OCRv5_server_det",
                 text_detection_model_dir='ocr_model/det', 
-                text_recognition_model_name='PP-OCRv5_mobile_rec',
+                text_recognition_model_name='PP-OCRv5_server_rec',
                 text_recognition_model_dir='ocr_model/rec',
                 use_textline_orientation=False,
                 use_doc_orientation_classify=False,
