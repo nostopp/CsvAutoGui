@@ -94,6 +94,7 @@ MwParam = {
     "x1": 0x0001,  # 侧键后退按钮
     "x2": 0x0002,  # 侧键前进按钮
 }
+PRIMARY = "left"
 PRESS_TIME = 0.02
 SAVE_SCREENSHOT_PATH = None
 SAVE_SCREENSHOT = False
@@ -120,8 +121,8 @@ class BackGroundInput(BaseInput):
                 self._window_left += 8
                 self._window_top += 8
 
-            self._mouse_x = self._screen_width // 2
-            self._mouse_y = self._screen_height // 2
+            self._mouse_x = int(self._screen_width // 2)
+            self._mouse_y = int(self._screen_height // 2)
         else:
             print(f"未找到窗口: {window_title}")
             return None
@@ -190,38 +191,47 @@ class BackGroundInput(BaseInput):
 
     def activate(self):
         win32gui.PostMessage(self._hwnd, win32con.WM_ACTIVATE, win32con.WA_ACTIVE, 0)
+        
+    def deactivate(self):
+        win32gui.PostMessage(self._hwnd, win32con.WM_ACTIVATE, win32con.WA_INACTIVE, 0)
 
     def moveTo(self, x, y, duration=0.0):
-        wparam = 0
-        lparam = y << 16 | x
-        self._mouse_x = x
-        self._mouse_y = y
-        win32gui.PostMessage(self._hwnd, WmCode['mouse_move'], wparam, lparam)
+        # self.activate()
+        self._mouse_x = int(x)
+        self._mouse_y = int(y)
+        # wparam = 0
+        # lparam = y << 16 | x
+        # win32gui.PostMessage(self._hwnd, WmCode['mouse_move'], wparam, lparam)
+        # self.deactivate()
 
     def moveRel(self, xOffset, yOffset, duration=None):
         pass
 
-    def click(self, button: str):
-        # self.activate()
+    def click(self, button=PRIMARY):
+        # win32api.SetCursorPos((self._mouse_x, self._mouse_y))
         self.mouseDown(button)
         time.sleep(PRESS_TIME)
         self.mouseUp(button)
 
-    def mouseDown(self, button: str):
+    def mouseDown(self, button=PRIMARY):
+        self.activate()
         wparam = 0
         if button in ["x1", "x2"]:
             wparam = MwParam[button]
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_down"]
-        win32gui.PostMessage(self._hwnd, message, wparam, int(lparam))
+        win32gui.PostMessage(self._hwnd, message, wparam, lparam)
+        self.deactivate()
 
-    def mouseUp(self, button: str):
+    def mouseUp(self, button=PRIMARY):
+        self.activate()
         wparam = 0
         if button in ["x1", "x2"]:
             wparam = MwParam[button]
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_up"]
         win32gui.PostMessage(self._hwnd, message, wparam, lparam)
+        self.deactivate()
 
     def virtualKeyCode(self, key: str):
         # 获取打印字符
@@ -238,20 +248,24 @@ class BackGroundInput(BaseInput):
         self.keyUp(key)
 
     def keyDown(self, key: str):
+        self.activate()
         vk_code = self.virtualKeyCode(key)
         scan_code = ctypes.windll.user32.MapVirtualKeyW(vk_code, 0)
         # https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
         wparam = vk_code
         lparam = (scan_code << 16) | 1
         win32gui.PostMessage(self._hwnd, WmCode["key_down"], wparam, lparam)
+        self.deactivate()
 
     def keyUp(self, key: str):
+        self.activate()
         vk_code = self.virtualKeyCode(key)
         scan_code = ctypes.windll.user32.MapVirtualKeyW(vk_code, 0)
         # https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
         wparam = vk_code
         lparam = (scan_code << 16) | 1
         win32gui.PostMessage(self._hwnd, WmCode["key_up"], wparam, lparam)
+        self.deactivate()
 
     def SaveScreenshot(self, fileName: str, img):
         cv2.imwrite(f'{SAVE_SCREENSHOT_PATH}/{fileName}-{time.strftime("%m%d%H%M%S", time.localtime())}.png', img)
