@@ -1,4 +1,3 @@
-# from paddleocr import PaddleOCR, draw_ocr
 import threading
 import pyautogui
 import cv2
@@ -18,7 +17,7 @@ class LazyPaddleOCR:
     
     def __init__(self):
         self._ocrEngine = None
-        self._drawOcr = None
+        # self._drawOcr = None
         self._startedInit = False
         self._initThread = threading.Thread(target=self.initialize)
         self._initThread.daemon = True
@@ -36,8 +35,8 @@ class LazyPaddleOCR:
         with cls._importLock:
             if not cls._imported:
                 # print("LazyPaddleOCR: Importing PaddleOCR...")
-                global PaddleOCR, draw_ocr
-                from paddleocr import PaddleOCR, draw_ocr  
+                global PaddleOCR#, draw_ocr
+                from paddleocr import PaddleOCR#, draw_ocr  
                 cls._imported = True
                 # print("LazyPaddleOCR: PaddleOCR imported successfully.")
     
@@ -48,13 +47,16 @@ class LazyPaddleOCR:
             if not LazyPaddleOCR._imported:
                 LazyPaddleOCR._importPaddleocr()  # 触发导入
             self._ocrEngine = PaddleOCR(
-                use_angle_cls=True, lang='ch', show_log=False,
-                det_model_dir='ocr_model/det', 
-                rec_model_dir='ocr_model/rec',
-                cls_model_dir='ocr_model/cls',
-                use_gpu = True,
+                # lang='ch',
+                text_detection_model_name="PP-OCRv5_mobile_det",
+                text_detection_model_dir='ocr_model/det', 
+                text_recognition_model_name='PP-OCRv5_mobile_rec',
+                text_recognition_model_dir='ocr_model/rec',
+                use_textline_orientation=False,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
             )
-            self._drawOcr = draw_ocr
+            # self._drawOcr = draw_ocr
             print("OCR初始化完成")
     
     def getOcr(self):
@@ -65,26 +67,30 @@ class LazyPaddleOCR:
             self._initThread.join()
         return self._ocrEngine
         
-    def drawOcr(self, image, boxes, texts=None, scores=None):
-        if not self._startedInit:
-            self.initialize()  # 如果未初始化则启动
-        if self._initThread and self._initThread.is_alive():
-            self._initThread.join()
-        return self._drawOcr(image, boxes, texts, scores)
+    # def drawOcr(self, image, boxes, texts=None, scores=None):
+    #     if not self._startedInit:
+    #         self.initialize()  # 如果未初始化则启动
+    #     if self._initThread and self._initThread.is_alive():
+    #         self._initThread.join()
+    #     return self._drawOcr(image, boxes, texts, scores)
 _lazyOcr = LazyPaddleOCR.Instance()
 
 def SaveOCRFile(ocrResult, cvImg):
-    if ocrResult is None or cvImg is None:
+    if ocrResult is None or not ocrResult or cvImg is None:
         return
 
-    image = cv2.cvtColor(cvImg, cv2.COLOR_GRAY2RGB)  # 转换为RGB格式
+    # image = cv2.cvtColor(cvImg, cv2.COLOR_BGR2RGB)  # 转换为RGB格式
 
-    boxes = [detec[0] for line in ocrResult for detec in line or {}]
-    texts = [detec[1][0] for line in ocrResult for detec in line or {}]
-    scores = [detec[1][1] for line in ocrResult for detec in line or {}]
-    visualized_image = _lazyOcr.drawOcr(image, boxes, texts, scores)
+    # result = ocrResult[0]  # 获取第一页结果
+    # boxes = result['rec_polys']  # 文本框坐标列表
+    # texts = result['rec_texts']  # 识别的文本列表
+    # scores = result['rec_scores']  # 置信度列表
+    
+    # visualized_image = _lazyOcr.drawOcr(image, boxes, texts, scores)
 
-    cv2.imwrite(f'{OCR_FILE_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.png', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
+    # cv2.imwrite(f'{OCR_FILE_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.png', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
+    result = ocrResult[0]
+    result.save_to_img(f'{OCR_FILE_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.png')
 
 def GetTargetCenter(points, findStr, word):
     wordBox = np.array(points)  # 文本框四个点坐标
@@ -102,20 +108,22 @@ def GetTargetCenter(points, findStr, word):
     return int(midPoint[0]), int(midPoint[1]), width, height
 
 def FindTextInResult(ocrResult, findStr : str, confidence: float):
-    if ocrResult is None:
+    if ocrResult is None or not ocrResult:
         return None, None, None, None
 
-    for line in ocrResult:
-        for word_info in line or []:
-            word, conf = word_info[1]
-            if findStr in word and conf >= confidence:
-                points = word_info[0]
-                return GetTargetCenter(points, findStr, word)
+    result = ocrResult[0]  # 获取第一页结果
+    texts = result['rec_texts']  # 识别的文本列表
+    scores = result['rec_scores']  # 置信度列表
+    boxes = result['rec_polys']  # 文本框坐标列表
+    
+    for i, (text, score) in enumerate(zip(texts, scores)):
+        if findStr in text and score >= confidence:
+            return GetTargetCenter(boxes[i], findStr, text)
     
     return None, None, None, None
 
 def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
-    if ocrResult is None:
+    if ocrResult is None or not ocrResult:
         return None, None, None, None
 
     compareFunc = None
@@ -133,17 +141,19 @@ def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
         case '!=':
             compareFunc = lambda a, b: a != b
 
-    for line in ocrResult:
-        for word_info in line or []:
-            word, conf = word_info[1]
-            if word.isdigit() and conf >= confidence and compareFunc(float(word), float(findStr)):
-                points = word_info[0]
-                wordBox = np.array(points)
-                midPoint = wordBox[0] + (wordBox[1]-wordBox[0]) * 0.5
-                midPoint += (wordBox[3] - wordBox[0]) / 2
-                height = int(np.linalg.norm(wordBox[3] - wordBox[0]))
-                width = int(np.linalg.norm(wordBox[1] - wordBox[0]))
-                return midPoint[0], midPoint[1], width, height
+    result = ocrResult[0]  # 获取第一页结果
+    texts = result['rec_texts']  # 识别的文本列表
+    scores = result['rec_scores']  # 置信度列表
+    boxes = result['rec_polys']  # 文本框坐标列表
+    
+    for i, (text, score) in enumerate(zip(texts, scores)):
+        if text.isdigit() and score >= confidence and compareFunc(float(text), float(findStr)):
+            wordBox = np.array(boxes[i])
+            midPoint = wordBox[0] + (wordBox[1]-wordBox[0]) * 0.5
+            midPoint += (wordBox[3] - wordBox[0]) / 2
+            height = int(np.linalg.norm(wordBox[3] - wordBox[0]))
+            width = int(np.linalg.norm(wordBox[1] - wordBox[0]))
+            return midPoint[0], midPoint[1], width, height
 
     return None, None, None, None
 
@@ -153,11 +163,12 @@ def OCR(findStr:str, input:BaseInput, findRegion=None, confidence:float = 0.8) -
     # screenshotIm = pyautogui.screenshot()
     # cvImg = np.array(screenshotIm.convert('RGB'))
     screenshotIm = input.screenShot()
-    cvImg = cv2.cvtColor(screenshotIm, cv2.COLOR_BGR2GRAY)
+    # cvImg = cv2.cvtColor(screenshotIm, cv2.COLOR_BGR2GRAY)
+    cvImg = screenshotIm
     if findRegion and len(findRegion) == 4:
         findRegion = input.convertFindRegion(findRegion)
         cvImg = cvImg[findRegion[1]:findRegion[1] + findRegion[3], findRegion[0]:findRegion[0] + findRegion[2]]
-    result = _lazyOcr.getOcr().ocr(cvImg, cls=True)
+    result = _lazyOcr.getOcr().predict(cvImg)
 
     if findStr.startswith(COMPARE_START):
         split = findStr.split(';')
