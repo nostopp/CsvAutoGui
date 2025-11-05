@@ -185,9 +185,4 @@ def OCR(findStr:str, input:BaseInput, findRegion=None, confidence:float = 0.8) -
     if SAVE_OCR_FILE:
         SaveOCRFile(result, cvImg)
 
-    try:
-        screenshotIm.fp.close()
-    except AttributeError:
-        pass
-
     return xCenter, yCenter, width, height
