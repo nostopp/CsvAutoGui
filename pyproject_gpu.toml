@@ -7,7 +7,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "keyboard>=0.13.5",
     "opencv-python>=4.11.0.86",
-    "paddleocr==2.10.0",
+    "paddleocr==3.3.1",
     "paddlepaddle-gpu==3.2.1",
     "pillow>=11.1.0",
     "pyautogui>=0.9.54",
@@ -16,11 +16,12 @@ dependencies = [
     "setuptools>=78.1.0",
 ]
 
-[tool.uv]
-index-strategy = "unsafe-best-match"
-
 [[tool.uv.index]]
 url = "http://mirrors.aliyun.com/pypi/simple"
 
 [[tool.uv.index]]
+name = "paddle"
 url = "https://www.paddlepaddle.org.cn/packages/stable/cu129"
+
+[tool.uv.sources]
+paddlepaddle-gpu = { index = "paddle" }
