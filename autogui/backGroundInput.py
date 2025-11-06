@@ -91,6 +91,13 @@ WmCode = {
     "mouse_wheel": 0x020A,
 }
 MwParam = {
+    "left": 0x0001,
+    "right": 0x0002,
+    "middle": 0x0010,
+    "x1": 0x0020,
+    "x2": 0x0040,
+}
+MHwParam = {
     "x1": 0x0001,  # 侧键后退按钮
     "x2": 0x0002,  # 侧键前进按钮
 }
@@ -351,9 +358,9 @@ class BackGroundInput(BaseInput):
     @_multiWindowCheck
     def mouseDown(self, button=PRIMARY):
         self.activate()
-        wparam = 0
+        wparam = MwParam[button]
         if button in ["x1", "x2"]:
-            wparam = MwParam[button]
+            wparam = wparam | MHwParam[button] << 16
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_down"]
         win32gui.PostMessage(self._hwnd, message, wparam, lparam)
@@ -364,7 +371,7 @@ class BackGroundInput(BaseInput):
         self.activate()
         wparam = 0
         if button in ["x1", "x2"]:
-            wparam = MwParam[button]
+            wparam = wparam | MHwParam[button] << 16
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_up"]
         win32gui.PostMessage(self._hwnd, message, wparam, lparam)
