@@ -126,6 +126,67 @@ class BackGroundInput(BaseInput):
         else:
             print(f"未找到窗口: {window_title}")
             return None
+    
+    def findWindowRecursive(self, parent_hwnd, class_name):
+        result_hwnd = [None]  # 使用列表来在回调函数中传递引用
+
+        def callback(hwnd, _):
+            # 如果已经找到了，就没必要继续遍历了
+            if result_hwnd[0] is not None:
+                return
+            
+            # 检查当前子窗口的类名
+            current_class = win32gui.GetClassName(hwnd)
+            # print(f"  正在检查句柄 {hwnd}，类名: {current_class}") # 调试时可以取消注释
+            
+            if current_class == class_name:
+                result_hwnd[0] = hwnd # 找到了！
+            else:
+                # 没找到，继续深入搜索这个子窗口的后代
+                # 注意：不能直接在这里递归，EnumChildWindows会处理所有同级，
+                pass
+            return True # 继续枚举
+
+        # 优先在直接子级中查找
+        win32gui.EnumChildWindows(parent_hwnd, callback, None)
+        if result_hwnd[0]:
+            return result_hwnd[0]
+
+        # 如果直接子级没找到，则对每个直接子级进行递归
+        child_hwnds = []
+        win32gui.EnumChildWindows(parent_hwnd, lambda hwnd, param: param.append(hwnd), child_hwnds)
+        
+        for child_hwnd in child_hwnds:
+            found_hwnd = self.findWindowRecursive(child_hwnd, class_name)
+            if found_hwnd:
+                return found_hwnd
+                
+        return None
+
+    def findSameNameWindowRecursive(self, parent_hwnd, class_name, index):
+        hwnds = self.findAllWindowsRecursive(parent_hwnd, class_name)
+        if len(hwnds) > index:
+            return hwnds[index]
+        
+        return None
+
+    def findAllWindowsRecursive(self, parent_hwnd, class_name):
+        hwnds = []
+        
+        # 查找所有直接子窗口
+        child_hwnds = []
+        win32gui.EnumChildWindows(parent_hwnd, lambda hwnd, param: param.append(hwnd), child_hwnds)
+
+        for hwnd in child_hwnds:
+            # 检查当前子窗口的类名
+            if win32gui.GetClassName(hwnd) == class_name:
+                hwnds.append(hwnd)
+            
+            # 无论当前是否匹配，都继续深入其后代进行查找
+            hwnds.extend(self.findAllWindowsRecursive(hwnd, class_name))
+            
+        return hwnds
+
 
     def convertFindRegion(self, region):
         if region is None:
