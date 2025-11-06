@@ -32,6 +32,7 @@ if autogui.ocr.SAVE_OCR_FILE:
 def getProcessName():
     import win32gui
     import win32process
+    import psutil
     def list_all_windows():
         windows = []
     
@@ -39,12 +40,19 @@ def getProcessName():
             if win32gui.IsWindowVisible(hwnd):
                 title = win32gui.GetWindowText(hwnd)
                 if title:  # 只显示有标题的窗口
-                    class_name = win32gui.GetClassName(hwnd)
+                    # class_name = win32gui.GetClassName(hwnd)
                     _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    process_name = ""
+                    try:
+                        if pid > 0:
+                            process = psutil.Process(pid)
+                            process_name = process.name()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        process_name = "Unknown"
                     windows_list.append({
                         'hwnd': hwnd,
                         'title': title,
-                        'class': class_name,
+                        'process': process_name,
                         'pid': pid
                     })
             return True
@@ -55,7 +63,7 @@ def getProcessName():
     # 列出所有可见窗口
     all_windows = list_all_windows()
     for window in all_windows:
-        print(f"HWND: {window['hwnd']}, PID: {window['pid']}, 类名: {window['class']}, 标题: '{window['title']}'")
+        print(f"HWND: {window['hwnd']}, PID: {window['pid']}, 进程: {window['process']}, 标题: '{window['title']}'")
 
 KEEP_RUN = True
 def main():
