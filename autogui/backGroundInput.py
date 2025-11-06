@@ -100,16 +100,17 @@ SAVE_SCREENSHOT_PATH = None
 SAVE_SCREENSHOT = False
 
 class BackGroundInput(BaseInput):
-    def __init__(self, window_title: str):
+    def __init__(self, window_title: str, multi_window = False):
         self._window_title = window_title
+        self._multi_window = multi_window
         hwnd = win32gui.FindWindow(None, window_title)  # 获取窗口句柄
         if hwnd:
             self._hwnd = hwnd
             
-            left, top, right, bottom = win32gui.GetClientRect(self._hwnd)
+            # left, top, right, bottom = win32gui.GetClientRect(self._hwnd)
+            # self._width = right - left
+            # self._height = bottom - top
             window_left, window_top, window_right, window_bottom = win32gui.GetWindowRect(self._hwnd)
-            self._width = right - left
-            self._height = bottom - top
             self._window_left = window_left
             self._window_top = window_top
             self._window_width = window_right - window_left
@@ -186,7 +187,80 @@ class BackGroundInput(BaseInput):
             hwnds.extend(self.findAllWindowsRecursive(hwnd, class_name))
             
         return hwnds
+        
+    def findWindowAtPos(self, parent_hwnd, target_point):
+        # 1. 转换坐标系：从父窗口客户区坐标到屏幕绝对坐标
+        try:
+            screen_point = win32gui.ClientToScreen(parent_hwnd, target_point)
+        except win32gui.error:
+            print(f"警告: 无法将坐标 {target_point} 转换为屏幕坐标。父窗口可能已失效。")
+            return None
 
+        # 2. 递归枚举所有后代，并筛选出所有可能的候选者
+        candidates = []
+        
+        def enum_child_proc(hwnd, lparam):
+            try:
+                # a. 必须是可见且启用的窗口
+                if not win32gui.IsWindowVisible(hwnd) or not win32gui.IsWindowEnabled(hwnd):
+                    return True
+                
+                # b. 获取控件的屏幕矩形
+                rect = win32gui.GetWindowRect(hwnd)
+                
+                # c. 检查点是否在矩形内
+                if win32gui.PtInRect(rect, screen_point):
+                    # 如果点在矩形内，计算其面积并将其作为候选者
+                    width = rect[2] - rect[0]
+                    height = rect[3] - rect[1]
+                    area = width * height
+                    candidates.append((hwnd, area)) # 存储 (句柄, 面积)
+            except win32gui.error:
+                # 忽略没有权限访问或已经销毁的窗口
+                pass
+            return True # 继续枚举
+
+        try:
+            win32gui.EnumChildWindows(parent_hwnd, enum_child_proc, None)
+        except win32gui.error:
+            pass # 如果父窗口本身有问题，就此打住
+
+        # 3. 筛选出“最佳”匹配项：面积最小的那个
+        if not candidates:
+            # 如果一个子控件都没找到，目标可能就是父窗口本身
+            # 检查父窗口客户区是否包含该点
+            try:
+                client_rect = win32gui.GetClientRect(parent_hwnd)
+                if win32api.PtInRect(client_rect, target_point):
+                    return parent_hwnd
+            except win32gui.error:
+                pass
+            return None
+
+        # 按面积从小到大排序
+        candidates.sort(key=lambda x: x[1])
+        
+        # 返回面积最小的那个控件的句柄
+        return candidates[0][0]
+
+    def _multiWindowCheck(func):
+        def wrapper(self : "BackGroundInput", *args, **kwargs):
+            retVal = None
+            if self._multi_window:
+                origin_hwnd = self._hwnd
+                origin_x, origin_y = self._mouse_x, self._mouse_y
+                hwnd = self.findWindowAtPos(origin_hwnd, (self._mouse_x, self._mouse_y))
+                if hwnd and hwnd > 0:
+                    self._hwnd = hwnd
+                    screen_pos = win32gui.ClientToScreen(origin_hwnd, (self._mouse_x, self._mouse_y))
+                    self._mouse_x, self._mouse_y = win32gui.ScreenToClient(hwnd, screen_pos)
+                retVal = func(self, *args, **kwargs)
+                self._hwnd = origin_hwnd
+                self._mouse_x, self._mouse_y = origin_x, origin_y
+            else:
+                retVal = func(self, *args, **kwargs)
+            return retVal
+        return wrapper
 
     def convertFindRegion(self, region):
         if region is None:
@@ -274,6 +348,7 @@ class BackGroundInput(BaseInput):
         time.sleep(PRESS_TIME)
         self.mouseUp(button)
 
+    @_multiWindowCheck
     def mouseDown(self, button=PRIMARY):
         self.activate()
         wparam = 0
@@ -284,6 +359,7 @@ class BackGroundInput(BaseInput):
         win32gui.PostMessage(self._hwnd, message, wparam, lparam)
         self.deactivate()
 
+    @_multiWindowCheck
     def mouseUp(self, button=PRIMARY):
         self.activate()
         wparam = 0
@@ -308,6 +384,7 @@ class BackGroundInput(BaseInput):
         time.sleep(PRESS_TIME)
         self.keyUp(key)
 
+    @_multiWindowCheck
     def keyDown(self, key: str):
         self.activate()
         vk_code = self.virtualKeyCode(key)
@@ -318,6 +395,7 @@ class BackGroundInput(BaseInput):
         win32gui.PostMessage(self._hwnd, WmCode["key_down"], wparam, lparam)
         self.deactivate()
 
+    @_multiWindowCheck
     def keyUp(self, key: str):
         self.activate()
         vk_code = self.virtualKeyCode(key)
