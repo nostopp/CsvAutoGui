@@ -40,7 +40,7 @@ def getProcessName():
             if win32gui.IsWindowVisible(hwnd):
                 title = win32gui.GetWindowText(hwnd)
                 if title:  # 只显示有标题的窗口
-                    # class_name = win32gui.GetClassName(hwnd)
+                    class_name = win32gui.GetClassName(hwnd)
                     _, pid = win32process.GetWindowThreadProcessId(hwnd)
                     process_name = ""
                     try:
@@ -53,7 +53,8 @@ def getProcessName():
                         'hwnd': hwnd,
                         'title': title,
                         'process': process_name,
-                        'pid': pid
+                        'pid': pid,
+                        'class_name': class_name,
                     })
             return True
     
@@ -63,7 +64,21 @@ def getProcessName():
     # 列出所有可见窗口
     all_windows = list_all_windows()
     for window in all_windows:
-        print(f"HWND: {window['hwnd']}, PID: {window['pid']}, 进程: {window['process']}, 标题: '{window['title']}'")
+        print(f"HWND: {window['hwnd']}, PID: {window['pid']}, CLASS: {window['class_name']}, 进程: {window['process']}, 标题: '{window['title']}'")
+
+    cur_pos = win32gui.GetCursorPos()
+    cur_hwnd = win32gui.WindowFromPoint(cur_pos)
+    _, pid = win32process.GetWindowThreadProcessId(cur_hwnd)
+    title = win32gui.GetWindowText(cur_hwnd)
+    class_name = win32gui.GetClassName(cur_hwnd)
+    process_name = ""
+    try:
+        if pid > 0:
+            process = psutil.Process(pid)
+            process_name = process.name()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        process_name = "Unknown"
+    print(f"当前鼠标位置 HWND: {cur_hwnd}, PID: {pid}, CLASS: {class_name}, 进程: {process_name}, 标题: '{title}'")
 
 KEEP_RUN = True
 def main():
