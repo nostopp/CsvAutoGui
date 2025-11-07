@@ -88,9 +88,9 @@ class AutoOperator:
                         if len(operateParam) <= 2:
                             if self._printLog:
                                 print(f'启动配置 {operateParam[1]}')
-                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, self._input, False, self._printLog))
 
-                            return None, lambda x : x, None
+                            return None, None, None
                         else:
                             if self._printLog:
                                 print(f'跳转 {operateParam[1]}')
@@ -121,9 +121,9 @@ class AutoOperator:
                     if len(operateParam) <= 2:
                         if self._printLog:
                             print(f'启动配置 {operateParam[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, self._input, False, self._printLog))
                         
-                        return None, lambda x : x, None
+                        return None, None, None
                     else:
                         if self._printLog:
                             print(f'跳转 {operateParam[1]}')
@@ -162,9 +162,9 @@ class AutoOperator:
                         if len(operateParam) <= 2:
                             if self._printLog:
                                 print(f'启动配置 {operateParam[1]}')
-                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, self._input, False, self._printLog))
 
-                            return None, lambda x : x, None
+                            return None, None, None
                         else:
                             if self._printLog:
                                 print(f'跳转 {operateParam[1]}')
@@ -195,9 +195,9 @@ class AutoOperator:
                     if len(operateParam) <= 2:
                         if self._printLog:
                             print(f'启动配置 {operateParam[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, self._input, False, self._printLog))
                         
-                        return None, lambda x : x, None
+                        return None, None, None
                     else:
                         if self._printLog:
                             print(f'跳转 {operateParam[1]}')
