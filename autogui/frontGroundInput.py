@@ -9,8 +9,8 @@ MOVE_FPS = 60
 MOVE_INTERVAL = 1/MOVE_FPS
 PRIMARY = "left"
 class FrontGroundInput(BaseInput):
-    def __init__(self):
-        pass
+    def __init__(self, printLog=False):
+        self._printLog = printLog
 
     def locateCenterOnScreen(self, image, **kwargs):
         return pyautogui.locateCenterOnScreen(image, **kwargs)

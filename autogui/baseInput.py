@@ -3,8 +3,8 @@ from pyautogui import Point
 
 PRIMARY = "left"
 class BaseInput:
-    def __init__(self):
-        pass
+    def __init__(self, printLog=False):
+        self._printLog = printLog
     def locateCenterOnScreen(self, image, **kwargs) -> Point:
         return Point(100, 100)
     def convertFindRegion(self, region):

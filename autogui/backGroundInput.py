@@ -107,9 +107,10 @@ SAVE_SCREENSHOT_PATH = None
 SAVE_SCREENSHOT = False
 
 class BackGroundInput(BaseInput):
-    def __init__(self, window_title: str, multi_window = False):
+    def __init__(self, window_title: str, multi_window = False, print_log=False):
         self._window_title = window_title
         self._multi_window = multi_window
+        self._pring_log = print_log
         hwnd = win32gui.FindWindow(None, window_title)  # 获取窗口句柄
         if hwnd:
             self._hwnd = hwnd
@@ -198,7 +199,7 @@ class BackGroundInput(BaseInput):
     def findWindowAtPos(self, parent_hwnd, target_point):
         # 1. 转换坐标系：从父窗口客户区坐标到屏幕绝对坐标
         try:
-            screen_point = win32gui.ClientToScreen(parent_hwnd, target_point)
+            screen_point = (target_point[0] + self._window_left, target_point[1] + self._window_top)
         except win32gui.error:
             print(f"警告: 无法将坐标 {target_point} 转换为屏幕坐标。父窗口可能已失效。")
             return None
@@ -238,7 +239,7 @@ class BackGroundInput(BaseInput):
             # 检查父窗口客户区是否包含该点
             try:
                 client_rect = win32gui.GetClientRect(parent_hwnd)
-                if win32api.PtInRect(client_rect, target_point):
+                if win32gui.PtInRect(client_rect, target_point):
                     return parent_hwnd
             except win32gui.error:
                 pass
@@ -257,10 +258,15 @@ class BackGroundInput(BaseInput):
                 origin_hwnd = self._hwnd
                 origin_x, origin_y = self._mouse_x, self._mouse_y
                 hwnd = self.findWindowAtPos(origin_hwnd, (self._mouse_x, self._mouse_y))
-                if hwnd and hwnd > 0:
+                if hwnd and hwnd > 0 and hwnd != origin_hwnd:
                     self._hwnd = hwnd
-                    screen_pos = win32gui.ClientToScreen(origin_hwnd, (self._mouse_x, self._mouse_y))
-                    self._mouse_x, self._mouse_y = win32gui.ScreenToClient(hwnd, screen_pos)
+                    # screen_pos = win32gui.ClientToScreen(origin_hwnd, (self._mouse_x, self._mouse_y))
+                    # self._mouse_x, self._mouse_y = win32gui.ScreenToClient(hwnd, screen_pos)
+                    # 子控件还需要考虑裁剪吗
+                    screen_pos = (self._mouse_x + self._window_left, self._mouse_y + self._window_top)
+                    window_left, window_top, _, _ = win32gui.GetWindowRect(self._hwnd)
+                    self._mouse_x = screen_pos[0] - window_left
+                    self._mouse_y = screen_pos[1] - window_top
                 retVal = func(self, *args, **kwargs)
                 self._hwnd = origin_hwnd
                 self._mouse_x, self._mouse_y = origin_x, origin_y
@@ -347,7 +353,8 @@ class BackGroundInput(BaseInput):
         # self.deactivate()
 
     def moveRel(self, xOffset, yOffset, duration=None):
-        pass
+        self._mouse_x += int(xOffset)
+        self._mouse_y += int(yOffset)
 
     def click(self, button=PRIMARY):
         # win32api.SetCursorPos((self._mouse_x, self._mouse_y))

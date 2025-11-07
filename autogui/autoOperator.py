@@ -80,14 +80,24 @@ class AutoOperator:
             if operateParam:
                 match operateParam[0]:
                     case 'notExist':
-                        if self._printLog:
-                            print(f'启动配置 {operateParam[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                        if len(operateParam) <= 2:
+                            if self._printLog:
+                                print(f'启动配置 {operateParam[1]}')
+                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
 
-                        return None, lambda x : x, None
+                            return None, lambda x : x, None
+                        else:
+                            if self._printLog:
+                                print(f'跳转 {operateParam[1]}')
+                            return None, lambda x : operateParam[1], None
 
                     case 'exist':
-                        return None, None, None
+                        if len(operateParam) <= 2:
+                            return None, None, None
+                        else:
+                            if self._printLog:
+                                print(f'跳转 {operateParam[2]}')
+                            return None, lambda x : operateParam[2], None
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         except Exception as e:
@@ -103,11 +113,23 @@ class AutoOperator:
                     self._input.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
             else:
                 if operateParam[0] == 'exist':
-                    if self._printLog:
-                        print(f'启动配置 {operateParam[1]}')
-                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
-                    
-                    return None, lambda x : x, None
+                    if len(operateParam) <= 2:
+                        if self._printLog:
+                            print(f'启动配置 {operateParam[1]}')
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                        
+                        return None, lambda x : x, None
+                    else:
+                        if self._printLog:
+                            print(f'跳转 {operateParam[1]}')
+                        return None, lambda x : operateParam[1], None
+                else:
+                    if len(operateParam) <= 2:
+                        return None, None, None
+                    else:
+                        if self._printLog:
+                            print(f'跳转 {operateParam[2]}')
+                        return None, lambda x : operateParam[2], None
 
             return None, None, None
 
@@ -132,14 +154,24 @@ class AutoOperator:
             if operateParam:
                 match operateParam[0]:
                     case 'notExist':
-                        if self._printLog:
-                            print(f'启动配置 {operateParam[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                        if len(operateParam) <= 2:
+                            if self._printLog:
+                                print(f'启动配置 {operateParam[1]}')
+                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
 
-                        return None, lambda x : x, None
+                            return None, lambda x : x, None
+                        else:
+                            if self._printLog:
+                                print(f'跳转 {operateParam[1]}')
+                            return None, lambda x : operateParam[1], None
 
                     case 'exist':
-                        return None, None, None
+                        if len(operateParam) <= 2:
+                            return None, None, None
+                        else:
+                            if self._printLog:
+                                print(f'跳转 {operateParam[2]}')
+                            return None, lambda x : operateParam[2], None
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         else:
@@ -155,11 +187,23 @@ class AutoOperator:
                     self._input.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
             else:
                 if operateParam[0] == 'exist':
-                    if self._printLog:
-                        print(f'启动配置 {operateParam[1]}')
-                    self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
-                    
-                    return None, lambda x : x, None
+                    if len(operateParam) <= 2:
+                        if self._printLog:
+                            print(f'启动配置 {operateParam[1]}')
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, False, self._printLog))
+                        
+                        return None, lambda x : x, None
+                    else:
+                        if self._printLog:
+                            print(f'跳转 {operateParam[1]}')
+                        return None, lambda x : operateParam[1], None
+                else:
+                    if len(operateParam) <= 2:
+                        return None, None, None
+                    else:
+                        if self._printLog:
+                            print(f'跳转 {operateParam[2]}')
+                        return None, lambda x : operateParam[2], None
 
             return None, None, None
 

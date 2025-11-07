@@ -19,7 +19,11 @@ def ParseParamData(param:str, operate:str):
         case 'click' | 'mDown' | 'mUp' | 'press' | 'kDown' | 'kUp' | 'write':
             param_data = param
         case 'pic' | 'ocr':
-            param_data = tuple(param.split(";"))
+            param_data = param.split(";")
+            if len(param_data) == 3:
+                param_data[1] = int(param_data[1])
+                param_data[2] = int(param_data[2])
+            param_data = tuple(param_data)
         case 'mMove' | 'mMoveTo':
             data = param.split(";")
             xOffset=ScaleHelper.Instance().getScaleInt(int(data[0])) 

@@ -30,6 +30,7 @@ if autogui.backGroundInput.SAVE_SCREENSHOT:
     autogui.backGroundInput.SAVE_SCREENSHOT_PATH = CONFIG_PATH
 if autogui.ocr.SAVE_OCR_FILE:
     autogui.ocr.OCR_FILE_PATH = CONFIG_PATH
+autogui.ocr.PRINT_LOG = PRINT_LOG
 
 def getProcessName():
     import win32gui
@@ -100,9 +101,9 @@ def main():
             mainOperator.Update()
     else:
         if not TITLE:
-            input = autogui.FrontGroundInput()
+            input = autogui.FrontGroundInput(PRINT_LOG)
         else:
-            input = autogui.BackGroundInput(TITLE, MULTI_WINDOW)
+            input = autogui.BackGroundInput(TITLE, MULTI_WINDOW, PRINT_LOG)
         
         subOperatorList : list[autogui.AutoOperator]= [] 
         mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH), CONFIG_PATH, subOperatorList, input, LOOP, PRINT_LOG)

@@ -6,7 +6,7 @@ if sys.platform == "win32":
 
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
-from .ocr import OCR
+from .ocr import OCR,PRINT_LOG
 from .autoOperator import AutoOperator
 from .screenshotMode import ScreenshotMode
 from .baseInput import BaseInput

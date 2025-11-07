@@ -74,8 +74,8 @@
 | kDown | key | 键盘按键按下（参数必须） |
 | kUp | key | 键盘按键松开（参数必须） |
 | write | text | 键盘输入（参数必须） |
-| pic | exist;fileName.csv / notExist;fileName.csv | 识图 |
-| ocr | exist;fileName.csv / notExist;fileName.csv | OCR 识别 |
+| pic | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | 识图 |
+| ocr | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | OCR 识别 |
 | notify | text | 通知(当前text不生效,用系统提示音来替代) |
 
 ---
@@ -83,7 +83,9 @@
 ## 其他说明
 
 - `pic` 与 `ocr` 操作在没有操作参数时，默认不断找图直到找到后将鼠标移至图片中心。
-- `pic` 与 `ocr` 在使用 `exist` 或 `notExist` 后，不满足条件将执行下一步不会持续找图，满足条件将会启动新的 CSV，执行完毕后重新执行此步。
+- `pic` 与 `ocr` 在使用 `exist` 或 `notExist` 后有两种配置     
+   - 配置你要执行的 file.csv, 满足条件将会开启新的csv文件并执行，在执行完毕后会回到该csv并再执行一次本行，若不满足条件则会继续执行下一行   
+   - 配置 int;int,若满足条件则跳转到第一个int配置的序号步骤，不满足则跳转到第二个int配置的步骤序号
 
 ---
 ## 关于OCR版本

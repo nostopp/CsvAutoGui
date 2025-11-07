@@ -8,6 +8,7 @@ from .baseInput import BaseInput
 SAVE_OCR_FILE = False
 OCR_FILE_PATH = None
 
+PRINT_LOG = False
 COMPARE_START = ('<;', '<=;', '>;', '>=;', '==;', '!=;')
 
 class LazyPaddleOCR:
@@ -117,6 +118,8 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
     boxes = result['rec_polys']  # 文本框坐标列表
     
     for i, (text, score) in enumerate(zip(texts, scores)):
+        if PRINT_LOG:
+            print(f'OCR识别到文本: "{text}" 置信度: {score}')
         if findStr in text and score >= confidence:
             return GetTargetCenter(boxes[i], findStr, text)
     
@@ -154,6 +157,8 @@ def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
     boxes = result['rec_polys']  # 文本框坐标列表
     
     for i, (text, score) in enumerate(zip(texts, scores)):
+        if PRINT_LOG:
+            print(f'OCR识别到文本: "{text}" 置信度: {score}')
         if isNumber(text) and score >= confidence and compareFunc(float(text), float(findStr)):
             wordBox = np.array(boxes[i])
             midPoint = wordBox[0] + (wordBox[1]-wordBox[0]) * 0.5
