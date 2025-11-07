@@ -238,8 +238,8 @@ class BackGroundInput(BaseInput):
             # 如果一个子控件都没找到，目标可能就是父窗口本身
             # 检查父窗口客户区是否包含该点
             try:
-                client_rect = win32gui.GetClientRect(parent_hwnd)
-                if win32gui.PtInRect(client_rect, target_point):
+                rect = win32gui.GetWindowRect(parent_hwnd)
+                if win32gui.PtInRect(rect, screen_point):
                     return parent_hwnd
             except win32gui.error:
                 pass
