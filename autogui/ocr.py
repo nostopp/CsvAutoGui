@@ -122,6 +122,13 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
     
     return None, None, None, None
 
+def isNumber(s: str) -> bool:
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
 def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
     if ocrResult is None or not ocrResult:
         return None, None, None, None
@@ -147,7 +154,7 @@ def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
     boxes = result['rec_polys']  # 文本框坐标列表
     
     for i, (text, score) in enumerate(zip(texts, scores)):
-        if text.isdigit() and score >= confidence and compareFunc(float(text), float(findStr)):
+        if isNumber(text) and score >= confidence and compareFunc(float(text), float(findStr)):
             wordBox = np.array(boxes[i])
             midPoint = wordBox[0] + (wordBox[1]-wordBox[0]) * 0.5
             midPoint += (wordBox[3] - wordBox[0]) / 2
