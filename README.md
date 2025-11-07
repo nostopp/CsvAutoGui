@@ -77,7 +77,6 @@
 | pic | exist;fileName.csv / notExist;fileName.csv | 识图 |
 | ocr | exist;fileName.csv / notExist;fileName.csv | OCR 识别 |
 | notify | text | 通知(当前text不生效,用系统提示音来替代) |
-| end |   | 终止该 CSV 的继续执行 |
 
 ---
 

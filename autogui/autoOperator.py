@@ -226,8 +226,6 @@ class AutoOperator:
                     #todo 用通知实现
                     winsound.Beep(200, 500)
                     winsound.Beep(200, 500)
-                case 'end':
-                    indexChangeFunc = lambda x : len(self._operateDict) + 1
 
         except Exception as e:
             raise e
