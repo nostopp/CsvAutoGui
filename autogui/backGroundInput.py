@@ -281,23 +281,20 @@ class BackGroundInput(BaseInput):
         return (region[0] - self._window_left, region[1] - self._window_top, region[2], region[3])
 
     def locateCenterOnScreen(self, img, **kwargs):
-        try:
-            # self.activate()
-            screenshotIm = self.screenShot()
-            if 'region' in kwargs:
-                region = kwargs['region']
-                region = self.convertFindRegion(region)
-                kwargs['region'] = region
+        # self.activate()
+        screenshotIm = self.screenShot()
+        if 'region' in kwargs:
+            region = kwargs['region']
+            region = self.convertFindRegion(region)
+            kwargs['region'] = region
 
-                if SAVE_SCREENSHOT:
-                    crop_image = screenshotIm[region[1] : region[1] + region[3], region[0] : region[0] + region[2]]
-                    self.SaveScreenshot('screenshot_crop', crop_image)
-            retVal = pyautogui.locate(img, screenshotIm, **kwargs)
+            if SAVE_SCREENSHOT:
+                crop_image = screenshotIm[region[1] : region[1] + region[3], region[0] : region[0] + region[2]]
+                self.SaveScreenshot('screenshot_crop', crop_image)
+        retVal = pyautogui.locate(img, screenshotIm, **kwargs)
 
-            if retVal:
-                return pyautogui.center(retVal)
-        except pyscreeze.ImageNotFoundException:
-            raise
+        if retVal:
+            return pyautogui.center(retVal)
 
     def screenShot(self):
         # win32gui.SetForegroundWindow(self._hwnd)

@@ -5,6 +5,7 @@ import pyperclip
 import time
 import random
 import numpy as np
+import re
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
@@ -73,9 +74,13 @@ class AutoOperator:
 
             if self._printLog:
                 print(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}')
-        except pyautogui.ImageNotFoundException:
+        except pyautogui.ImageNotFoundException as e:
             if self._printLog:
-                print(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
+                match = re.search(r'confidence\s*=\s*([\d.-]+)', str(e.__context__))
+                if match:
+                    print(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}, 置信度: {match.group(1)}')
+                else:
+                    print(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
             
             if operateParam:
                 match operateParam[0]:
