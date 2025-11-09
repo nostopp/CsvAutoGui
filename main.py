@@ -13,6 +13,7 @@ parser.add_argument("--offset", help="搜索时需要的偏移值", default="0;0
 parser.add_argument("-t", "--title", help="目标窗口名称,指定后程序运行在后台窗口模式", default=None, type=str)
 parser.add_argument("-m", "--multi_window", action="store_true", help="后台窗口多窗口控件模式", default=False)
 parser.add_argument("--process", action="store_true", help="获取所有可见窗口名称", default=False)
+parser.add_argument("--record", action="store_true", help="录制鼠标和键盘事件并导出 CSV", default=False)
 args = parser.parse_args()
 
 CONFIG_PATH = args.config
@@ -22,6 +23,7 @@ SCREENSHOT_MODE = args.screenshots
 GET_PROCESS = args.process
 TITLE = args.title
 MULTI_WINDOW = args.multi_window
+RECORD = args.record
 print(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 截图模式: {args.screenshots}")
 
 autogui.ScaleHelper.Instance().Init(args.scale, args.offset, args.scale_image)
@@ -97,6 +99,11 @@ def main():
 
     if SCREENSHOT_MODE:
         mainOperator = autogui.ScreenshotMode()
+        while KEEP_RUN:
+            mainOperator.Update()
+    elif RECORD:
+        # 进入录制模式
+        mainOperator = autogui.RecordMode()
         while KEEP_RUN:
             mainOperator.Update()
     else:

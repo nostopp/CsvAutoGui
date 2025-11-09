@@ -12,3 +12,4 @@ from .screenshotMode import ScreenshotMode
 from .baseInput import BaseInput
 from .frontGroundInput import FrontGroundInput
 from .backGroundInput import BackGroundInput
+from .recordMode import RecordMode
