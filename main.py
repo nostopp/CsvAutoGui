@@ -1,5 +1,6 @@
 import argparse
 import keyboard
+import mouse
 import autogui
 
 parser = argparse.ArgumentParser(description="自动化操作")
@@ -123,6 +124,7 @@ def main():
                 if not mainOperator.Update():
                     break
 
+    mouse.unhook_all()
     keyboard.unhook_all()
 
 if __name__ == "__main__":
