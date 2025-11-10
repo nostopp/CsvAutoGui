@@ -90,10 +90,10 @@ class RecordMode:
         # 记录时间戳，保存时再计算每条事件之后的等待时间
         self._last_time = now
 
-        try:
-            print(f"Keyboard event: {event.event_type} key: {event.name}")
-        except Exception:
-            pass
+        # try:
+        #     print(f"Keyboard event: {event.event_type} key: {event.name}")
+        # except Exception:
+        #     pass
 
         try:
             etype = event.event_type
@@ -145,10 +145,10 @@ class RecordMode:
         if etype is None and x is not None and y is not None:
             etype = 'move'
 
-        try:
-            print(f"Mouse event: {etype} at ({x},{y}) button: {button}")
-        except Exception:
-            pass
+        # try:
+        #     print(f"Mouse event: {etype} at ({x},{y}) button: {button}")
+        # except Exception:
+        #     pass
 
         # 鼠标按下/释放
         if etype in ('down',) and button is not None:
@@ -159,19 +159,19 @@ class RecordMode:
             return
 
         # 鼠标移动事件（有坐标）
-        if etype in ('move',):
-            # 限制频率
-            if now - self._last_move_time < self._move_min_interval:
-                return
-            self._last_move_time = now
-            try:
-                px = int(x)
-                py = int(y)
-            except Exception:
-                # 如果坐标不可用，则跳过
-                return
-            self._events.append({'op': 'mMoveTo', 'param': f"{px};{py}", 'time': now})
-            return
+        # if etype in ('move',):
+        #     # 限制频率
+        #     if now - self._last_move_time < self._move_min_interval:
+        #         return
+        #     self._last_move_time = now
+        #     try:
+        #         px = int(x)
+        #         py = int(y)
+        #     except Exception:
+        #         # 如果坐标不可用，则跳过
+        #         return
+        #     self._events.append({'op': 'mMoveTo', 'param': f"{px};{py}", 'time': now})
+        #     return
 
     def SaveCsv(self):
         if len(self._events) == 0:
