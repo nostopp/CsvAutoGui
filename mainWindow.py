@@ -96,7 +96,7 @@ class MainWindow:
         frm_bottom = tk.Frame(root)
         frm_bottom.pack(fill=tk.X, padx=6, pady=6)
 
-        btn_clear = tk.Button(frm_bottom, text='Clear Logs', command=self.clear_logs)
+        btn_clear = tk.Button(frm_bottom, text='Clear', command=self.clear_logs)
         btn_clear.pack(side=tk.LEFT)
 
         btn_save = tk.Button(frm_bottom, text='Save Params', command=self.save_params)
@@ -261,13 +261,25 @@ class MainWindow:
         self._start_instance_with_args(inst.args)
 
     def clear_logs(self):
-        inst = self.get_selected_instance()
-        if not inst:
+        """清空所有 instances（停止并移除）"""
+        if not self.instances:
+            messagebox.showinfo('Info', '没有实例可清理')
             return
-        inst.logs = []
-        self.txt_log['state'] = 'normal'
-        self.txt_log.delete('1.0', tk.END)
-        self.txt_log['state'] = 'disabled'
+        
+        # 确认操作
+        if messagebox.askyesno('确认', '确定要清空所有实例吗？'):
+            # 停止所有实例
+            for inst in self.instances.values():
+                inst.stop_event.set()
+            # 清空实例列表
+            self.instances.clear()
+            self.next_id = 1
+            # 更新 UI
+            self.listbox.delete(0, tk.END)
+            self.txt_log['state'] = 'normal'
+            self.txt_log.delete('1.0', tk.END)
+            self.txt_log['state'] = 'disabled'
+            messagebox.showinfo('完成', '所有实例已清空')
 
     def save_params(self):
         """让用户选择文件名并将当前参数保存为 JSON"""
