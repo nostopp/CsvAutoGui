@@ -1,7 +1,8 @@
 import threading
 import argparse
+import json
 import tkinter as tk
-from tkinter import scrolledtext, messagebox
+from tkinter import scrolledtext, messagebox, filedialog
 import main as main_module
 
 
@@ -97,6 +98,12 @@ class MainWindow:
 
         btn_clear = tk.Button(frm_bottom, text='Clear Logs', command=self.clear_logs)
         btn_clear.pack(side=tk.LEFT)
+
+        btn_save = tk.Button(frm_bottom, text='Save Params', command=self.save_params)
+        btn_save.pack(side=tk.LEFT, padx=6)
+
+        btn_load = tk.Button(frm_bottom, text='Load Params', command=self.load_params)
+        btn_load.pack(side=tk.LEFT)
 
         # 快捷键说明
         lbl_hotkey = tk.Label(frm_bottom, text='快捷键 Shift+Ctrl+X：停止所有实例', fg='blue')
@@ -261,6 +268,89 @@ class MainWindow:
         self.txt_log['state'] = 'normal'
         self.txt_log.delete('1.0', tk.END)
         self.txt_log['state'] = 'disabled'
+
+    def save_params(self):
+        """让用户选择文件名并将当前参数保存为 JSON"""
+        args = self.build_args()
+        data = {
+            'config': args.config,
+            'loop': args.loop,
+            'log': args.log,
+            'screenshots': args.screenshots,
+            'scale': args.scale,
+            'scale_image': args.scale_image,
+            'offset': args.offset,
+            'title': args.title,
+            'multi_window': args.multi_window,
+            'process': args.process,
+            'record': args.record,
+        }
+
+        path = filedialog.asksaveasfilename(defaultextension='.json', filetypes=[('JSON', '*.json')], title='保存参数为 JSON')
+        if not path:
+            return
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            messagebox.showinfo('保存成功', f'参数已保存到:\n{path}')
+        except Exception as e:
+            messagebox.showerror('保存失败', f'无法保存参数: {e}')
+
+    def load_params(self):
+        """从 JSON 文件加载参数并应用到界面"""
+        path = filedialog.askopenfilename(filetypes=[('JSON', '*.json')], title='选择参数 JSON 文件')
+        if not path:
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as e:
+            messagebox.showerror('读取失败', f'无法读取文件: {e}')
+            return
+
+        # 应用各参数（存在性与类型安全检查）
+        try:
+            if 'config' in data:
+                self.e_config.delete(0, tk.END)
+                self.e_config.insert(0, str(data.get('config','')))
+
+            if 'loop' in data:
+                self.var_loop.set(bool(data.get('loop')))
+
+            if 'log' in data:
+                self.var_log.set(bool(data.get('log')))
+
+            if 'screenshots' in data:
+                self.var_screenshots.set(bool(data.get('screenshots')))
+
+            if 'scale' in data:
+                self.e_scale.delete(0, tk.END)
+                self.e_scale.insert(0, str(data.get('scale')))
+
+            if 'scale_image' in data:
+                self.var_scale_image.set(bool(data.get('scale_image')))
+
+            if 'offset' in data:
+                self.e_offset.delete(0, tk.END)
+                self.e_offset.insert(0, str(data.get('offset')))
+
+            if 'title' in data:
+                self.e_title.delete(0, tk.END)
+                if data.get('title'):
+                    self.e_title.insert(0, str(data.get('title')))
+
+            if 'multi_window' in data:
+                self.var_multi.set(bool(data.get('multi_window')))
+
+            if 'process' in data:
+                self.var_process.set(bool(data.get('process')))
+
+            if 'record' in data:
+                self.var_record.set(bool(data.get('record')))
+
+            messagebox.showinfo('加载成功', '参数已从文件应用')
+        except Exception as e:
+            messagebox.showerror('应用失败', f'无法应用参数: {e}')
 
 
 def main():
