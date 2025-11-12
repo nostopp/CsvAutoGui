@@ -96,8 +96,11 @@ class MainWindow:
         frm_bottom = tk.Frame(root)
         frm_bottom.pack(fill=tk.X, padx=6, pady=6)
 
-        btn_clear = tk.Button(frm_bottom, text='Clear', command=self.clear_logs)
+        btn_clear = tk.Button(frm_bottom, text='Clear', command=self.clear_instances)
         btn_clear.pack(side=tk.LEFT)
+
+        btn_reload_csv = tk.Button(frm_bottom, text='Reload CSV', command=self.reload_csv)
+        btn_reload_csv.pack(side=tk.LEFT, padx=6)
 
         btn_save = tk.Button(frm_bottom, text='Save Params', command=self.save_params)
         btn_save.pack(side=tk.LEFT, padx=6)
@@ -152,8 +155,16 @@ class MainWindow:
                 sel = self.get_selected_instance()
                 if sel and sel.id == inst.id:
                     self.txt_log['state'] = 'normal'
+                    # 检查当前视图是否处于底部（用户正在查看最新日志），
+                    try:
+                        yview = self.txt_log.yview()
+                        at_bottom = (yview[1] >= 0.999)
+                    except Exception:
+                        at_bottom = True
+
                     self.txt_log.insert(tk.END, msg)
-                    self.txt_log.see(tk.END)
+                    if at_bottom:
+                        self.txt_log.see(tk.END)
                     self.txt_log['state'] = 'disabled'
 
             self.root.after(1, _update)
@@ -260,7 +271,7 @@ class MainWindow:
         # 使用相同参数启动新实例
         self._start_instance_with_args(inst.args)
 
-    def clear_logs(self):
+    def clear_instances(self):
         """清空所有 instances（停止并移除）"""
         if not self.instances:
             messagebox.showinfo('Info', '没有实例可清理')
@@ -279,7 +290,7 @@ class MainWindow:
             self.txt_log['state'] = 'normal'
             self.txt_log.delete('1.0', tk.END)
             self.txt_log['state'] = 'disabled'
-            messagebox.showinfo('完成', '所有实例已清空')
+            # messagebox.showinfo('完成', '所有实例已清空')
 
     def save_params(self):
         """让用户选择文件名并将当前参数保存为 JSON"""
@@ -304,7 +315,7 @@ class MainWindow:
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            messagebox.showinfo('保存成功', f'参数已保存到:\n{path}')
+            # messagebox.showinfo('保存成功', f'参数已保存到:\n{path}')
         except Exception as e:
             messagebox.showerror('保存失败', f'无法保存参数: {e}')
 
@@ -360,9 +371,20 @@ class MainWindow:
             if 'record' in data:
                 self.var_record.set(bool(data.get('record')))
 
-            messagebox.showinfo('加载成功', '参数已从文件应用')
+            # messagebox.showinfo('加载成功', '参数已从文件应用')
         except Exception as e:
             messagebox.showerror('应用失败', f'无法应用参数: {e}')
+    
+    def reload_csv(self):
+        """重新加载 main.csv 文件"""
+        try:
+            import autogui.parser as parser
+            if messagebox.askyesno('确认', '重载CSV需要停止所有实例，是否继续？'):
+                self.stop_all()
+                parser.csvDataDict.clear()
+                # messagebox.showinfo('加载成功', 'CSV已重新加载')
+        except Exception as e:
+            messagebox.showerror('重载失败')
 
 
 def main():
