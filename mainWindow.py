@@ -78,6 +78,9 @@ class MainWindow:
         btn_stop_all = tk.Button(frm_top, text='Stop All', command=self.stop_all)
         btn_stop_all.grid(row=5, column=2)
 
+        btn_restart = tk.Button(frm_top, text='Restart Selected', command=self.restart_selected)
+        btn_restart.grid(row=5, column=3)
+
         # 中部：实例列表 + 日志显示
         frm_mid = tk.Frame(root)
         frm_mid.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
@@ -129,27 +132,15 @@ class MainWindow:
         )
         return ns
 
-    def start_instance(self):
-        args = self.build_args()
-        name = args.config
-        iid = self.next_id
-        self.next_id += 1
-        inst = InstanceEntry(iid, name, args)
-        self.instances[iid] = inst
-
-        display_name = f"{name} (id:{iid}) [starting]"
-        self.listbox.insert(tk.END, display_name)
-
+    def _launch_instance_thread(self, inst):
+        """内部方法：为 InstanceEntry 创建并启动后台线程"""
         def log_cb(msg: str):
-            # 将日志追加到实例 buffer 并在 UI 中刷新（线程安全 via after）
             if not msg.endswith('\n'):
                 msg = msg + '\n'
             inst.logs.append(msg)
-            # 保持一定的缓存大小
             if len(inst.logs) > 5000:
                 inst.logs = inst.logs[-2500:]
 
-            # 如果当前选中的是此实例，则更新文本区
             def _update():
                 sel = self.get_selected_instance()
                 if sel and sel.id == inst.id:
@@ -162,25 +153,27 @@ class MainWindow:
 
         def target():
             inst.running = True
-            # 更新 listbox 为 running
             def _mark_running():
-                idx = list(self.instances.keys()).index(inst.id)
-                self.listbox.delete(idx)
-                self.listbox.insert(idx, f"{inst.name} (id:{inst.id}) [running]")
+                try:
+                    keys = list(self.instances.keys())
+                    idx = keys.index(inst.id)
+                    self.listbox.delete(idx)
+                    self.listbox.insert(idx, f"{inst.name} (id:{inst.id}) [running]")
+                except Exception:
+                    pass
+
             try:
                 self.root.after(1, _mark_running)
             except Exception:
                 pass
 
             try:
-                # 调用 main.start_instance（use_hotkey=False）
                 main_module.start_instance(inst.args, log_callback=log_cb, stop_event=inst.stop_event, use_hotkey=False)
             except Exception as e:
                 log_cb(f"实例异常结束: {e}\n")
             finally:
                 inst.running = False
                 def _mark_stopped():
-                    # 查找索引并更新显示
                     try:
                         keys = list(self.instances.keys())
                         idx = keys.index(inst.id)
@@ -193,6 +186,24 @@ class MainWindow:
         t = threading.Thread(target=target, daemon=True)
         inst.thread = t
         t.start()
+
+    def start_instance(self):
+        """从 UI 表单构建参数并启动新实例"""
+        args = self.build_args()
+        self._start_instance_with_args(args)
+
+    def _start_instance_with_args(self, args):
+        """内部方法：用指定的 args 创建实例并启动"""
+        name = args.config
+        iid = self.next_id
+        self.next_id += 1
+        inst = InstanceEntry(iid, name, args)
+        self.instances[iid] = inst
+
+        display_name = f"{name} (id:{iid}) [starting]"
+        self.listbox.insert(tk.END, display_name)
+
+        self._launch_instance_thread(inst)
 
     def get_selected_instance(self):
         sel = self.listbox.curselection()
@@ -223,6 +234,24 @@ class MainWindow:
     def stop_all(self):
         for inst in self.instances.values():
             inst.stop_event.set()
+
+    def restart_selected(self):
+        inst = self.get_selected_instance()
+        if not inst:
+            messagebox.showinfo('Info', '未选择实例')
+            return
+        
+        # 先停止实例（如果未停止）
+        if inst.running:
+            inst.stop_event.set()
+            # 等待实例停止（最多等 3 秒）
+            for _ in range(30):
+                if not inst.running:
+                    break
+                threading.Event().wait(0.1)
+        
+        # 使用相同参数启动新实例
+        self._start_instance_with_args(inst.args)
 
     def clear_logs(self):
         inst = self.get_selected_instance()
