@@ -18,7 +18,7 @@ class InstanceEntry:
 
 
 class MainWindow:
-    def __init__(self, root):
+    def __init__(self, root:tk.Tk):
         self.root = root
         root.title('CsvAutoGui Manager')
 
@@ -72,15 +72,19 @@ class MainWindow:
 
         btn_start = tk.Button(frm_top, text='Start Instance', command=self.start_instance)
         btn_start.grid(row=5, column=0, pady=6)
+        Tooltip(btn_start, "点击启动一个新的实例(以当前参数)")
 
         btn_stop = tk.Button(frm_top, text='Stop Selected', command=self.stop_selected)
         btn_stop.grid(row=5, column=1)
+        Tooltip(btn_stop, "停止所选实例")
 
         btn_stop_all = tk.Button(frm_top, text='Stop All', command=self.stop_all)
         btn_stop_all.grid(row=5, column=2)
+        Tooltip(btn_stop_all, "停止所有实例")
 
         btn_restart = tk.Button(frm_top, text='Restart Selected', command=self.restart_selected)
         btn_restart.grid(row=5, column=3)
+        Tooltip(btn_restart, "重启所选实例(运行中则会先停止)")
 
         # 中部：实例列表 + 日志显示
         frm_mid = tk.Frame(root)
@@ -96,17 +100,21 @@ class MainWindow:
         frm_bottom = tk.Frame(root)
         frm_bottom.pack(fill=tk.X, padx=6, pady=6)
 
-        btn_clear = tk.Button(frm_bottom, text='Clear', command=self.clear_instances)
+        btn_clear = tk.Button(frm_bottom, text='Clear Instances', command=self.clear_instances)
         btn_clear.pack(side=tk.LEFT)
+        Tooltip(btn_clear, "清空所有实例(停止并移除)")
 
         btn_reload_csv = tk.Button(frm_bottom, text='Reload CSV', command=self.reload_csv)
         btn_reload_csv.pack(side=tk.LEFT, padx=6)
+        Tooltip(btn_reload_csv, "重新加载所有 CSV 文件")
 
         btn_save = tk.Button(frm_bottom, text='Save Params', command=self.save_params)
         btn_save.pack(side=tk.LEFT, padx=6)
+        Tooltip(btn_save, "保存当前参数到 JSON 文件")
 
         btn_load = tk.Button(frm_bottom, text='Load Params', command=self.load_params)
         btn_load.pack(side=tk.LEFT)
+        Tooltip(btn_load, "从 JSON 文件加载参数")
 
         # 快捷键说明
         lbl_hotkey = tk.Label(frm_bottom, text='快捷键 Shift+Ctrl+X：停止所有实例', fg='blue')
@@ -385,6 +393,110 @@ class MainWindow:
                 # messagebox.showinfo('加载成功', 'CSV已重新加载')
         except Exception as e:
             messagebox.showerror('重载失败')
+
+
+class Tooltip:
+    def __init__(self, widget:tk.Widget, text=None, delay=500, wraplength=300):
+        """
+        widget: 要绑定的 widget
+        text: 字符串或可调用（返回字符串）用于动态文本
+        delay: 毫秒，鼠标悬停多久显示提示
+        wraplength: 提示文本自动换行宽度（像素）
+        """
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self.wraplength = wraplength
+        self._job = None
+        self._tipwindow = None
+
+        widget.bind('<Enter>', self._on_enter, add=True)
+        widget.bind('<Leave>', self._on_leave, add=True)
+        widget.bind('<Motion>', self._on_motion, add=True)  # 更新位置 / 动态文本
+
+    def _on_enter(self, event=None):
+        self._schedule()
+
+    def _on_leave(self, event=None):
+        self._unschedule()
+        self._hide()
+
+    def _on_motion(self, event=None):
+        # 鼠标在控件上移动时（可以重新调度或更新位置）
+        if self._tipwindow:
+            self._reposition(event)
+
+    def _schedule(self):
+        self._unschedule()
+        self._job = self.widget.after(self.delay, self._show)
+
+    def _unschedule(self):
+        if self._job:
+            try:
+                self.widget.after_cancel(self._job)
+            except Exception:
+                pass
+            self._job = None
+
+    def _get_text(self):
+        if callable(self.text):
+            try:
+                return str(self.text())
+            except Exception:
+                return ''
+        return str(self.text or '')
+
+    def _show(self):
+        if self._tipwindow or not self.widget.winfo_ismapped():
+            return
+        text = self._get_text()
+        if not text:
+            return
+
+        # 创建无边框的 Toplevel 作为 tooltip
+        self._tipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.attributes('-topmost', True)
+
+        # 样式
+        label = tk.Label(tw, text=text, justify=tk.LEFT, background='#ffffe0',
+                         relief=tk.SOLID, borderwidth=1, wraplength=self.wraplength)
+        label.pack(ipadx=4, ipady=2)
+
+        # 初始定位
+        try:
+            x, y = self.widget.winfo_pointerxy()
+            tw.wm_geometry(f"+{x + 16}+{y + 16}")
+        except Exception:
+            # 退回到 widget 位置
+            x = self.widget.winfo_rootx()
+            y = self.widget.winfo_rooty()
+            tw.wm_geometry(f"+{x+16}+{y+16}")
+
+    def _reposition(self, event=None):
+        if not self._tipwindow:
+            return
+        try:
+            x, y = self.widget.winfo_pointerxy()
+            self._tipwindow.wm_geometry(f"+{x + 16}+{y + 16}")
+        except Exception:
+            pass
+
+    def _hide(self):
+        if self._tipwindow:
+            try:
+                self._tipwindow.destroy()
+            except Exception:
+                pass
+            self._tipwindow = None
+
+    def update_text(self, new_text_or_callable):
+        """运行时更新提示内容（可传字符串或可调用）"""
+        self.text = new_text_or_callable
+        # 如果 tooltip 已显示，刷新它的内容（简单方式：重新显示）
+        if self._tipwindow:
+            self._hide()
+            self._show()
 
 
 def main():
