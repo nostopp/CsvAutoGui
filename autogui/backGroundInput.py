@@ -9,6 +9,7 @@ import numpy as np
 import cv2
 import pyautogui
 import pyscreeze
+from . import log
 from .baseInput import BaseInput
 
 # https://docs.microsoft.com/zh/windows/win32/inputdev/virtual-key-codes
@@ -133,7 +134,7 @@ class BackGroundInput(BaseInput):
             self._mouse_x = int(self._screen_width // 2)
             self._mouse_y = int(self._screen_height // 2)
         else:
-            print(f"未找到窗口: {window_title}")
+            log.error(f"未找到窗口: {window_title}")
             return None
     
     def findWindowRecursive(self, parent_hwnd, class_name):
@@ -146,7 +147,7 @@ class BackGroundInput(BaseInput):
             
             # 检查当前子窗口的类名
             current_class = win32gui.GetClassName(hwnd)
-            # print(f"  正在检查句柄 {hwnd}，类名: {current_class}") # 调试时可以取消注释
+            # log.debug(f"  正在检查句柄 {hwnd}，类名: {current_class}") # 调试时可以取消注释
             
             if current_class == class_name:
                 result_hwnd[0] = hwnd # 找到了！
@@ -201,7 +202,7 @@ class BackGroundInput(BaseInput):
         try:
             screen_point = (target_point[0] + self._window_left, target_point[1] + self._window_top)
         except win32gui.error:
-            print(f"警告: 无法将坐标 {target_point} 转换为屏幕坐标。父窗口可能已失效。")
+            log.error(f"警告: 无法将坐标 {target_point} 转换为屏幕坐标。父窗口可能已失效。")
             return None
 
         # 2. 递归枚举所有后代，并筛选出所有可能的候选者

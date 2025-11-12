@@ -5,6 +5,7 @@ import keyboard
 import pyautogui
 import winsound
 import win32con
+from. import log
 
 screenshotDir = 'screenshot'
 
@@ -22,12 +23,12 @@ class ScreenshotMode:
 
         keyboard.add_hotkey('shift+f', self.PressFullScreenshot)
 
-        print('shift+c 将打印当前鼠标位置\nshift+x 将记录先后两次鼠标位置并截图该区域\nshift+f 将进行全屏截图')
+        log.info('shift+c 将打印当前鼠标位置\nshift+x 将记录先后两次鼠标位置并截图该区域\nshift+f 将进行全屏截图')
 
     def PressScreenshot(self):
         self._pressShotCount += 1
         pos = pyautogui.position()
-        print(f'鼠标位置: {pos}')
+        log.info(f'鼠标位置: {pos}')
         if self._pressShotCount >= 2:
             self.Screenshot(self._lastShotPos, pos)
             self._pressShotCount = 0
@@ -61,15 +62,15 @@ class ScreenshotMode:
             winsound.Beep(200, 100)
         except:
             pass
-        print(f"截图已保存: {filepath}")
+        log.info(f"截图已保存: {filepath}")
 
     def PressMousePosition(self):
         self._pressMouseCount += 1
         pos = pyautogui.position()
-        print(f'鼠标位置: {pos}')
+        log.info(f'鼠标位置: {pos}')
         if self._pressMouseCount >= 2:
             self._pressMouseCount = 0
-            print(f'鼠标位置相差: {pos.x - self._lastMousePos.x}, {pos.y - self._lastMousePos.y}')
+            log.info(f'鼠标位置相差: {pos.x - self._lastMousePos.x}, {pos.y - self._lastMousePos.y}')
         self._lastMousePos = pos
 
     def Update(self):

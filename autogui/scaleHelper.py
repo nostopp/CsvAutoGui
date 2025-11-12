@@ -1,13 +1,8 @@
 import cv2
 
 class ScaleHelper:
-    _instance = None
-
-    @classmethod
-    def Instance(cls):
-        if cls._instance is None:
-            cls._instance = ScaleHelper()
-        return cls._instance
+    def __init__(self):
+        pass
 
     def Init(self, scale, offset, scale_image):
         self.scale = scale
