@@ -459,7 +459,7 @@ class Tooltip:
         tw.attributes('-topmost', True)
 
         # 样式
-        label = tk.Label(tw, text=text, justify=tk.LEFT, background='#ffffe0',
+        label = tk.Label(tw, text=text, justify=tk.LEFT, background='#ffffff',
                          relief=tk.SOLID, borderwidth=1, wraplength=self.wraplength)
         label.pack(ipadx=4, ipady=2)
 
@@ -489,14 +489,6 @@ class Tooltip:
             except Exception:
                 pass
             self._tipwindow = None
-
-    def update_text(self, new_text_or_callable):
-        """运行时更新提示内容（可传字符串或可调用）"""
-        self.text = new_text_or_callable
-        # 如果 tooltip 已显示，刷新它的内容（简单方式：重新显示）
-        if self._tipwindow:
-            self._hide()
-            self._show()
 
 
 def main():
