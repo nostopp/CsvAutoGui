@@ -12,9 +12,13 @@
 2. 在其中创建主配置 `main.csv`。
 3. 参考 `template` 及 `example` 完成配置（示例图片名格式均为自带截图模式截图，仅保留一个示意）。
 4. 运行命令：
-
+   命令行方式运行
    ```powershell
    uv run main.py -c config/文件夹名称
+   ```
+   图像化运行
+   ```powershell
+   uv run mainWindow.py
    ```
 
 ### 运行参数
