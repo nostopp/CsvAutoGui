@@ -135,7 +135,7 @@ class MainWindow:
         lbl_hotkey.pack(side=tk.LEFT, padx=12)
 
         # 绑定系统级全局快捷键
-        keyboard.add_hotkey('ctrl+shift+x', self.stop_all, suppress=True)
+        keyboard.add_hotkey('ctrl+shift+x', self.stop_all)
         
         # 窗口关闭时清理快捷键
         self.root.protocol('WM_DELETE_WINDOW', self.on_closing)
