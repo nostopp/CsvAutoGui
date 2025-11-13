@@ -86,7 +86,7 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
     """
     try:
         # 将当前实例名（config 路径）放入线程上下文，方便日志带上来源
-        log.set_context({'name': args.config})
+        log.set_thread_context({'name': args.config})
         if log_callback and log_callback is not print:
             # 使用线程级 handler，避免多个实例互相覆盖全局 handler
             log.set_thread_handler(log_callback)
@@ -183,7 +183,7 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
                 pass
         # 恢复日志模块的上下文与 handler
         try:
-            log.clear_context()
+            log.clear_thread_context()
             log.reset_thread_handler()
         except Exception:
             pass

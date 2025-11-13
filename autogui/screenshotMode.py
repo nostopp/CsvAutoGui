@@ -5,7 +5,7 @@ import keyboard
 import pyautogui
 import winsound
 import win32con
-from. import log
+from . import log
 
 screenshotDir = 'screenshot'
 
@@ -15,13 +15,15 @@ class ScreenshotMode:
             os.makedirs(screenshotDir)
         self._pressShotCount = 0
         self._lastShotPos = None
-        keyboard.add_hotkey('shift+x', self.PressScreenshot)
+        # 捕获当前线程日志绑定（实例线程），用于在回调线程恢复
+        self._log_binding = log.capture_binding()
+        keyboard.add_hotkey('shift+x', log.wrap_callback(self.PressScreenshot, self._log_binding))
 
         self._pressMouseCount = 0
         self._lastMousePos = None
-        keyboard.add_hotkey('shift+c', self.PressMousePosition)
+        keyboard.add_hotkey('shift+c', log.wrap_callback(self.PressMousePosition, self._log_binding))
 
-        keyboard.add_hotkey('shift+f', self.PressFullScreenshot)
+        keyboard.add_hotkey('shift+f', log.wrap_callback(self.PressFullScreenshot, self._log_binding))
 
         log.info('shift+c 将打印当前鼠标位置\nshift+x 将记录先后两次鼠标位置并截图该区域\nshift+f 将进行全屏截图')
 

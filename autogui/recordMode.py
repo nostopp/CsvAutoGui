@@ -31,7 +31,9 @@ class RecordMode:
         # 跟踪当前按下但尚未释放的按键，避免键盘自动重复触发导致多次记录
         self._pressed_keys = set()
 
-        keyboard.add_hotkey('shift+x', self.ToggleRecord)
+        # 捕获当前线程日志绑定（实例线程），用于在回调线程恢复
+        self._log_binding = log.capture_binding()
+        keyboard.add_hotkey('shift+x', log.wrap_callback(self.ToggleRecord, self._log_binding))
         log.info('按下 shift + x 开始/停止录制（录制时会捕获鼠标与键盘事件）')
 
     def ToggleRecord(self):
@@ -50,13 +52,13 @@ class RecordMode:
             pass
         # 注册钩子
         try:
-            self._kbd_hook = keyboard.hook(self._on_keyboard_event)
+            self._kbd_hook = keyboard.hook(log.wrap_callback(self._on_keyboard_event, self._log_binding))
         except Exception as e:
             log.error('无法挂载 keyboard 钩子:', e)
             self._kbd_hook = None
 
         try:
-            self._mouse_hook = mouse.hook(self._on_mouse_event)
+            self._mouse_hook = mouse.hook(log.wrap_callback(self._on_mouse_event, self._log_binding))
         except Exception as e:
             log.error('无法挂载 mouse 钩子:', e)
             self._mouse_hook = None
