@@ -105,7 +105,7 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
     MULTI_WINDOW = args.multi_window
     RECORD = args.record
 
-    log.debug(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 截图模式: {SCREENSHOT_MODE}")
+    log.debug(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 截图模式: {SCREENSHOT_MODE}, 获取进程模式: {GET_PROCESS}, 录制操作模式: {RECORD}, 抓取的窗口标题: {TITLE}, 多窗口模式: {MULTI_WINDOW}")
 
     # 初始化 scale helper 等
     try:
