@@ -6,18 +6,20 @@ import time
 import random
 import numpy as np
 import re
+from . import log
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
 from .baseInput import BaseInput
 
 class AutoOperator:
-    def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, input:BaseInput, loop : bool = False, printLog : bool = False):
+    def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, input:BaseInput, scaleHelper : ScaleHelper,  loop : bool = False, printLog : bool = False):
         self._operateDict = operateDict
         self._operateIndex = 1
         self._configPath = configPath
         self._subOperatorList = subOperatorList
         self._input = input
+        self._scaleHelper = scaleHelper
         self._loop = loop
         self._printLog = printLog
 
@@ -41,7 +43,7 @@ class AutoOperator:
                 waitTime = operation['wait']
         if waitTime > 0:
             if self._printLog:
-                print(f'等待 {waitTime} s')
+                log.debug(f'等待 {waitTime} s')
             time.sleep(waitTime)
 
         if indexChangeFunc:
@@ -66,34 +68,34 @@ class AutoOperator:
             region = None if not 'pic_region' in operation else operation['pic_region']
 
             if not 'search_pic_cache' in operation:
-                img = ScaleHelper.Instance().getScaleImg(f'{self._configPath}/{operation["search_pic"]}')
+                img = self._scaleHelper.getScaleImg(f'{self._configPath}/{operation["search_pic"]}')
                 operation['search_pic_cache'] = img
             else:
                 img = operation['search_pic_cache']
             center = self._input.locateCenterOnScreen(img, confidence=confidence, region=region)            
 
             if self._printLog:
-                print(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}')
+                log.debug(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}')
         except pyautogui.ImageNotFoundException as e:
             if self._printLog:
                 match = re.search(r'confidence\s*=\s*([\d.-]+)', str(e.__context__))
                 if match:
-                    print(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}, 置信度: {match.group(1)}')
+                    log.debug(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}, 置信度: {match.group(1)}')
                 else:
-                    print(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
+                    log.debug(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
             
             if operateParam:
                 match operateParam[0]:
                     case 'notExist':
                         if len(operateParam) <= 2:
                             if self._printLog:
-                                print(f'启动配置 {operateParam[1]}')
-                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, self._input, False, self._printLog))
+                                log.debug(f'启动配置 {operateParam[1]}')
+                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, self._scaleHelper, operateParam[1]), self._configPath, self._subOperatorList, self._input, self._scaleHelper, False, self._printLog))
 
                             return None, None, None
                         else:
                             if self._printLog:
-                                print(f'跳转 {operateParam[1]}')
+                                log.debug(f'跳转 {operateParam[1]}')
                             return None, lambda x : operateParam[1], None
 
                     case 'exist':
@@ -101,7 +103,7 @@ class AutoOperator:
                             return None, None, None
                         else:
                             if self._printLog:
-                                print(f'跳转 {operateParam[2]}')
+                                log.debug(f'跳转 {operateParam[2]}')
                             return None, lambda x : operateParam[2], None
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
@@ -120,20 +122,20 @@ class AutoOperator:
                 if operateParam[0] == 'exist':
                     if len(operateParam) <= 2:
                         if self._printLog:
-                            print(f'启动配置 {operateParam[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, self._input, False, self._printLog))
+                            log.debug(f'启动配置 {operateParam[1]}')
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, self._scaleHelper, operateParam[1]), self._configPath, self._subOperatorList, self._input, self._scaleHelper, False, self._printLog))
                         
                         return None, None, None
                     else:
                         if self._printLog:
-                            print(f'跳转 {operateParam[1]}')
+                            log.debug(f'跳转 {operateParam[1]}')
                         return None, lambda x : operateParam[1], None
                 else:
                     if len(operateParam) <= 2:
                         return None, None, None
                     else:
                         if self._printLog:
-                            print(f'跳转 {operateParam[2]}')
+                            log.debug(f'跳转 {operateParam[2]}')
                         return None, lambda x : operateParam[2], None
 
             return None, None, None
@@ -154,20 +156,20 @@ class AutoOperator:
 
         if xCenter is None or yCenter is None:
             if self._printLog:
-                print(f'ocr {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
+                log.debug(f'ocr {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
 
             if operateParam:
                 match operateParam[0]:
                     case 'notExist':
                         if len(operateParam) <= 2:
                             if self._printLog:
-                                print(f'启动配置 {operateParam[1]}')
-                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, self._input, False, self._printLog))
+                                log.debug(f'启动配置 {operateParam[1]}')
+                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, self._scaleHelper, operateParam[1]), self._configPath, self._subOperatorList, self._input, self._scaleHelper, False, self._printLog))
 
                             return None, None, None
                         else:
                             if self._printLog:
-                                print(f'跳转 {operateParam[1]}')
+                                log.debug(f'跳转 {operateParam[1]}')
                             return None, lambda x : operateParam[1], None
 
                     case 'exist':
@@ -175,13 +177,13 @@ class AutoOperator:
                             return None, None, None
                         else:
                             if self._printLog:
-                                print(f'跳转 {operateParam[2]}')
+                                log.debug(f'跳转 {operateParam[2]}')
                             return None, lambda x : operateParam[2], None
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         else:
             if self._printLog:
-                print(f'ocr {operation["search_pic"]}, 用时: {time.time()-startTime:.2f}, 位置: {xCenter},{yCenter}')
+                log.debug(f'ocr {operation["search_pic"]}, 用时: {time.time()-startTime:.2f}, 位置: {xCenter},{yCenter}')
 
             if not operateParam:
                 if not 'pic_range_random' in operation:
@@ -194,20 +196,20 @@ class AutoOperator:
                 if operateParam[0] == 'exist':
                     if len(operateParam) <= 2:
                         if self._printLog:
-                            print(f'启动配置 {operateParam[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, operateParam[1]), self._configPath, self._subOperatorList, self._input, False, self._printLog))
+                            log.debug(f'启动配置 {operateParam[1]}')
+                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, self._scaleHelper, operateParam[1]), self._configPath, self._subOperatorList, self._input, self._scaleHelper, False, self._printLog))
                         
                         return None, None, None
                     else:
                         if self._printLog:
-                            print(f'跳转 {operateParam[1]}')
+                            log.debug(f'跳转 {operateParam[1]}')
                         return None, lambda x : operateParam[1], None
                 else:
                     if len(operateParam) <= 2:
                         return None, None, None
                     else:
                         if self._printLog:
-                            print(f'跳转 {operateParam[2]}')
+                            log.debug(f'跳转 {operateParam[2]}')
                         return None, lambda x : operateParam[2], None
 
             return None, None, None
@@ -219,7 +221,7 @@ class AutoOperator:
         try:
             operateParam = None if not 'operate_param' in operation else operation['operate_param']
             if self._printLog:
-                print(f'操作: {operation["operate"]}, 参数: {operateParam}')
+                log.debug(f'操作: {operation["operate"]}, 参数: {operateParam}')
             match operation['operate']:
                 case 'click':
                     if operateParam:

@@ -4,12 +4,17 @@ import cv2
 import numpy as np
 import time
 from .baseInput import BaseInput
+from . import log
 
 SAVE_OCR_FILE = False
 OCR_FILE_PATH = None
 
 PRINT_LOG = False
+_thread_local = threading.local()
 COMPARE_START = ('<;', '<=;', '>;', '>=;', '==;', '!=;')
+
+def shouldLog():
+    return getattr(_thread_local, 'PRINT_LOG', False)
 
 class LazyPaddleOCR:
     _instance = None
@@ -58,7 +63,7 @@ class LazyPaddleOCR:
                 use_doc_unwarping=False,
             )
             # self._drawOcr = draw_ocr
-            print("OCR初始化完成")
+            log.info("OCR初始化完成")
     
     def getOcr(self):
         if not self._startedInit:
@@ -118,8 +123,8 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
     boxes = result['rec_polys']  # 文本框坐标列表
     
     for i, (text, score) in enumerate(zip(texts, scores)):
-        if PRINT_LOG:
-            print(f'OCR识别到文本: "{text}" 置信度: {score}')
+        if shouldLog():
+            log.debug(f'OCR识别到文本: "{text}" 置信度: {score}')
         if findStr in text and score >= confidence:
             return GetTargetCenter(boxes[i], findStr, text)
     
@@ -157,8 +162,8 @@ def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
     boxes = result['rec_polys']  # 文本框坐标列表
     
     for i, (text, score) in enumerate(zip(texts, scores)):
-        if PRINT_LOG:
-            print(f'OCR识别到文本: "{text}" 置信度: {score}')
+        if shouldLog():
+            log.debug(f'OCR识别到文本: "{text}" 置信度: {score}')
         if isNumber(text) and score >= confidence and compareFunc(float(text), float(findStr)):
             wordBox = np.array(boxes[i])
             midPoint = wordBox[0] + (wordBox[1]-wordBox[0]) * 0.5
