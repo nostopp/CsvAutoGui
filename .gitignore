@@ -3,3 +3,4 @@ __pycache__
 screenshot
 record
 config/*/
+ocr_model/*/

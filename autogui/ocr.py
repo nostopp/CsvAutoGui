@@ -40,24 +40,38 @@ class LazyPaddleOCR:
     def _importPaddleocr(cls):
         with cls._importLock:
             if not cls._imported:
+                import os
+                os.environ['PADDLE_PDX_CACHE_HOME'] = './ocr_model'
+
                 # print("LazyPaddleOCR: Importing PaddleOCR...")
                 global PaddleOCR#, draw_ocr
                 from paddleocr import PaddleOCR#, draw_ocr  
                 cls._imported = True
                 # print("LazyPaddleOCR: PaddleOCR imported successfully.")
     
+    @staticmethod
+    def _resolve_model_settings():
+        import paddle
+
+        use_gpu = paddle.is_compiled_with_cuda()
+        if use_gpu:
+            return "PP-OCRv5_server_det", "PP-OCRv5_server_rec"
+        
+        return "PP-OCRv5_mobile_det", "PP-OCRv5_mobile_rec"
+
     def initialize(self):
         if not self._startedInit:
             # print("LazyPaddleOCR: Initializing OCR engine...")
             self._startedInit = True
             if not LazyPaddleOCR._imported:
                 LazyPaddleOCR._importPaddleocr()  # 触发导入
+            det_name, rec_name = self._resolve_model_settings()
             self._ocrEngine = PaddleOCR(
                 # lang='ch',
-                text_detection_model_name="PP-OCRv5_server_det",
-                text_detection_model_dir='ocr_model/det', 
-                text_recognition_model_name='PP-OCRv5_server_rec',
-                text_recognition_model_dir='ocr_model/rec',
+                text_detection_model_name=det_name,
+                # text_detection_model_dir='ocr_model/det', 
+                text_recognition_model_name=rec_name,
+                # text_recognition_model_dir='ocr_model/rec',
                 use_textline_orientation=False,
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
