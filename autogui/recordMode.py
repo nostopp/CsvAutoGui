@@ -5,6 +5,7 @@ import csv
 import winsound
 import keyboard
 import mouse
+import threading
 from . import log
 
 
@@ -46,10 +47,7 @@ class RecordMode:
         log.info('开始录制...')
         self._events = []
         self._last_time = time.time()
-        try:
-            winsound.Beep(200, 100)
-        except:
-            pass
+        threading.Thread(target=lambda: winsound.Beep(200, 100), daemon=True).start()
         # 注册钩子
         try:
             self._kbd_hook = keyboard.hook(log.wrap_callback(self._on_keyboard_event, self._log_binding))
@@ -67,10 +65,7 @@ class RecordMode:
 
     def StopRecord(self):
         log.info('停止录制，准备保存...')
-        try:
-            winsound.Beep(200, 100)
-        except:
-            pass
+        threading.Thread(target=lambda: winsound.Beep(200, 100), daemon=True).start()
         # 取消钩子
         try:
             if self._kbd_hook is not None:

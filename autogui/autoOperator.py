@@ -6,11 +6,14 @@ import time
 import random
 import numpy as np
 import re
+import threading
 from . import log
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
 from .baseInput import BaseInput
+
+CONFIDENCE_PATTERN = re.compile(r'confidence\s*=\s*([\d.-]+)')
 
 class AutoOperator:
     def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, input:BaseInput, scaleHelper : ScaleHelper,  loop : bool = False, printLog : bool = False):
@@ -78,7 +81,7 @@ class AutoOperator:
                 log.debug(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}')
         except pyautogui.ImageNotFoundException as e:
             if self._printLog:
-                match = re.search(r'confidence\s*=\s*([\d.-]+)', str(e.__context__))
+                match = CONFIDENCE_PATTERN.search(str(e.__context__))
                 if match:
                     log.debug(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}, 置信度: {match.group(1)}')
                 else:
@@ -275,8 +278,10 @@ class AutoOperator:
                     operationWait, indexChangeFunc, operationWaitRandom = self.Ocr(operation)
                 case 'notify':
                     #todo 用通知实现
-                    winsound.Beep(200, 500)
-                    winsound.Beep(200, 500)
+                    def _notify():
+                        winsound.Beep(200, 500)
+                        winsound.Beep(200, 500)
+                    threading.Thread(target=_notify, daemon=True).start()
 
         except Exception as e:
             raise e

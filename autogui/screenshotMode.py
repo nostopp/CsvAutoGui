@@ -5,6 +5,7 @@ import keyboard
 import pyautogui
 import winsound
 import win32con
+import threading
 from . import log
 
 screenshotDir = 'screenshot'
@@ -60,10 +61,7 @@ class ScreenshotMode:
         filepath = os.path.join(screenshotDir, filename)
         screenshot.save(filepath)
 
-        try:
-            winsound.Beep(200, 100)
-        except:
-            pass
+        threading.Thread(target=lambda: winsound.Beep(200, 100), daemon=True).start()
         log.info(f"截图已保存: {filepath}")
 
     def PressMousePosition(self):
