@@ -137,9 +137,10 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
     boxes = result['rec_polys']  # 文本框坐标列表
     
     for i, (text, score) in enumerate(zip(texts, scores)):
+        use_text = text.lower()
         if shouldLog():
-            log.debug(f'OCR识别到文本: "{text}" 置信度: {score}')
-        if findStr in text and score >= confidence:
+            log.debug(f'OCR识别到文本: "{text}" 置信度: {score}, 匹配使用: {use_text}')
+        if findStr in use_text and score >= confidence:
             return GetTargetCenter(boxes[i], findStr, text)
     
     return None, None, None, None
