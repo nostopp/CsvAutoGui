@@ -362,25 +362,25 @@ class BackGroundInput(BaseInput):
 
     @_multiWindowCheck
     def mouseDown(self, button=PRIMARY):
-        self.activate()
+        # self.activate()
         wparam = MwParam[button]
         if button in ["x1", "x2"]:
             wparam = wparam | MHwParam[button] << 16
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_down"]
         win32gui.PostMessage(self._hwnd, message, wparam, lparam)
-        self.deactivate()
+        # self.deactivate()
 
     @_multiWindowCheck
     def mouseUp(self, button=PRIMARY):
-        self.activate()
+        # self.activate()
         wparam = 0
         if button in ["x1", "x2"]:
             wparam = wparam | MHwParam[button] << 16
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_up"]
         win32gui.PostMessage(self._hwnd, message, wparam, lparam)
-        self.deactivate()
+        # self.deactivate()
 
     def virtualKeyCode(self, key: str):
         # 获取打印字符
@@ -398,25 +398,25 @@ class BackGroundInput(BaseInput):
 
     @_multiWindowCheck
     def keyDown(self, key: str):
-        self.activate()
+        # self.activate()
         vk_code = self.virtualKeyCode(key)
         scan_code = ctypes.windll.user32.MapVirtualKeyW(vk_code, 0)
         # https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
         wparam = vk_code
         lparam = (scan_code << 16) | 1
         win32gui.PostMessage(self._hwnd, WmCode["key_down"], wparam, lparam)
-        self.deactivate()
+        # self.deactivate()
 
     @_multiWindowCheck
     def keyUp(self, key: str):
-        self.activate()
+        # self.activate()
         vk_code = self.virtualKeyCode(key)
         scan_code = ctypes.windll.user32.MapVirtualKeyW(vk_code, 0)
         # https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
         wparam = vk_code
         lparam = (scan_code << 16) | 1
         win32gui.PostMessage(self._hwnd, WmCode["key_up"], wparam, lparam)
-        self.deactivate()
+        # self.deactivate()
 
     def SaveScreenshot(self, fileName: str, img):
         cv2.imwrite(f'{SAVE_SCREENSHOT_PATH}/{fileName}-{time.strftime("%m%d%H%M%S", time.localtime())}.png', img)
