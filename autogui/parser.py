@@ -21,8 +21,15 @@ def ParseParamData(param:str, operate:str, scaleHelper:ScaleHelper):
         case 'pic' | 'ocr':
             param_data = param.split(";")
             if len(param_data) == 3:
-                param_data[1] = int(param_data[1])
-                param_data[2] = int(param_data[2])
+                try:
+                    param_data[1] = int(param_data[1])
+                except:
+                    pass
+                try:
+                    param_data[2] = int(param_data[2])
+                except:
+                    pass
+
             param_data = tuple(param_data)
         case 'mMove' | 'mMoveTo':
             data = param.split(";")
@@ -72,6 +79,8 @@ def ParseCsv(path:str, fileName:str, scaleHelper:ScaleHelper) -> dict:
                     value['pic_range_random'] = True
             if CheckValueInCsv(row, '移动操作用时'):
                 value['move_time'] = float(row['移动操作用时'])
+            if CheckValueInCsv(row, '跳转标记'):
+                value['jump_mark'] = row['跳转标记']
             # 将键值对添加到字典中
             dataDict[key] = value
         return dataDict

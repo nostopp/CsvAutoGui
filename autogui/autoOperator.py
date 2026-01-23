@@ -25,6 +25,10 @@ class AutoOperator:
         self._scaleHelper = scaleHelper
         self._loop = loop
         self._printLog = printLog
+        self._jumpMarks = dict()
+        for index, operation in operateDict.items():
+            if 'jump_mark' in operation:
+                self._jumpMarks[operation['jump_mark']] = index
 
     def Update(self) -> bool:
         if len(self._operateDict) <= 0:
@@ -97,17 +101,19 @@ class AutoOperator:
 
                             return None, None, None
                         else:
+                            jump = self.Jump(operateParam[1])
                             if self._printLog:
-                                log.debug(f'跳转 {operateParam[1]}')
-                            return None, lambda x : operateParam[1], None
+                                log.debug(f'跳转 {operateParam[1]}, 实际跳转到 {jump}')
+                            return None, lambda x : jump, None
 
                     case 'exist':
                         if len(operateParam) <= 2:
                             return None, None, None
                         else:
+                            jump = self.Jump(operateParam[2])
                             if self._printLog:
-                                log.debug(f'跳转 {operateParam[2]}')
-                            return None, lambda x : operateParam[2], None
+                                log.debug(f'跳转 {operateParam[2]}, 实际跳转到 {jump}')
+                            return None, lambda x : jump, None
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         except Exception as e:
@@ -130,16 +136,18 @@ class AutoOperator:
                         
                         return None, None, None
                     else:
+                        jump = self.Jump(operateParam[1])
                         if self._printLog:
-                            log.debug(f'跳转 {operateParam[1]}')
-                        return None, lambda x : operateParam[1], None
+                            log.debug(f'跳转 {operateParam[1]}, 实际跳转到 {jump}')
+                        return None, lambda x : jump, None
                 else:
                     if len(operateParam) <= 2:
                         return None, None, None
                     else:
+                        jump = self.Jump(operateParam[2])
                         if self._printLog:
-                            log.debug(f'跳转 {operateParam[2]}')
-                        return None, lambda x : operateParam[2], None
+                            log.debug(f'跳转 {operateParam[2]}, 实际跳转到 {jump}')
+                        return None, lambda x : jump, None
 
             return None, None, None
 
@@ -171,17 +179,19 @@ class AutoOperator:
 
                             return None, None, None
                         else:
+                            jump = self.Jump(operateParam[1])
                             if self._printLog:
-                                log.debug(f'跳转 {operateParam[1]}')
-                            return None, lambda x : operateParam[1], None
+                                log.debug(f'跳转 {operateParam[1]}, 实际跳转到 {jump}')
+                            return None, lambda x : jump, None
 
                     case 'exist':
                         if len(operateParam) <= 2:
                             return None, None, None
                         else:
+                            jump = self.Jump(operateParam[2])
                             if self._printLog:
-                                log.debug(f'跳转 {operateParam[2]}')
-                            return None, lambda x : operateParam[2], None
+                                log.debug(f'跳转 {operateParam[2]}, 实际跳转到 {jump}')
+                            return None, lambda x : jump, None
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         else:
@@ -204,16 +214,18 @@ class AutoOperator:
                         
                         return None, None, None
                     else:
+                        jump = self.Jump(operateParam[1])
                         if self._printLog:
-                            log.debug(f'跳转 {operateParam[1]}')
-                        return None, lambda x : operateParam[1], None
+                            log.debug(f'跳转 {operateParam[1]}, 实际跳转到 {jump}')
+                        return None, lambda x : jump, None
                 else:
                     if len(operateParam) <= 2:
                         return None, None, None
                     else:
+                        jump = self.Jump(operateParam[2])
                         if self._printLog:
-                            log.debug(f'跳转 {operateParam[2]}')
-                        return None, lambda x : operateParam[2], None
+                            log.debug(f'跳转 {operateParam[2]}, 实际跳转到 {jump}')
+                        return None, lambda x : jump, None
 
             return None, None, None
 
@@ -287,3 +299,9 @@ class AutoOperator:
             raise e
 
         return operationWait, indexChangeFunc, operationWaitRandom
+
+    def Jump(self, target:int|str):
+        if target in self._jumpMarks:
+            return self._jumpMarks[target]
+        else:
+            return target
