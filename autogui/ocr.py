@@ -3,6 +3,7 @@ import pyautogui
 import cv2
 import numpy as np
 import time
+from pathlib import Path
 from .baseInput import BaseInput
 from . import log
 
@@ -98,6 +99,8 @@ _lazyOcr = LazyPaddleOCR.Instance()
 def SaveOCRFile(ocrResult, cvImg):
     if ocrResult is None or not ocrResult or cvImg is None:
         return
+    if not OCR_FILE_PATH:
+        return
 
     # image = cv2.cvtColor(cvImg, cv2.COLOR_BGR2RGB)  # 转换为RGB格式
 
@@ -110,7 +113,9 @@ def SaveOCRFile(ocrResult, cvImg):
 
     # cv2.imwrite(f'{OCR_FILE_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.png', cv2.cvtColor(visualized_image, cv2.COLOR_RGB2BGR))
     result = ocrResult[0]
-    result.save_to_img(f'{OCR_FILE_PATH}/OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.png')
+    out_path = Path(OCR_FILE_PATH) / f'OCR-{time.strftime("%m%d%H%M%S", time.localtime())}.png'
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    result.save_to_img(str(out_path))
 
 def GetTargetCenter(points, findStr, word):
     wordBox = np.array(points)  # 文本框四个点坐标

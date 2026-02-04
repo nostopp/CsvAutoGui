@@ -7,6 +7,7 @@ import random
 import numpy as np
 import re
 import threading
+from pathlib import Path
 from . import log
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
@@ -75,7 +76,8 @@ class AutoOperator:
             region = None if not 'pic_region' in operation else operation['pic_region']
 
             if not 'search_pic_cache' in operation:
-                img = self._scaleHelper.getScaleImg(f'{self._configPath}/{operation["search_pic"]}')
+                img_path = Path(self._configPath) / operation["search_pic"]
+                img = self._scaleHelper.getScaleImg(img_path)
                 operation['search_pic_cache'] = img
             else:
                 img = operation['search_pic_cache']

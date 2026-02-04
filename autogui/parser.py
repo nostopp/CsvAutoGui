@@ -1,4 +1,6 @@
 import csv
+import os
+from pathlib import Path
 from .scaleHelper import ScaleHelper
 
 csvDataDict = {}
@@ -7,11 +9,12 @@ def CheckValueInCsv(row : dict, key : str) -> bool:
     return key in row and row[key] != None and len(row[key]) > 0
 
 def GetCsv(path:str, scaleHelper:ScaleHelper, fileName:str = "main.csv") -> dict:
-    if fileName in csvDataDict:
-        return csvDataDict[fileName]
+    cache_key = os.fspath(Path(path) / fileName)
+    if cache_key in csvDataDict:
+        return csvDataDict[cache_key]
 
-    csvDataDict[fileName] = ParseCsv(path, fileName, scaleHelper)
-    return csvDataDict[fileName]
+    csvDataDict[cache_key] = ParseCsv(path, fileName, scaleHelper)
+    return csvDataDict[cache_key]
 
 def ParseParamData(param:str, operate:str, scaleHelper:ScaleHelper):
     param_data = None
@@ -41,7 +44,8 @@ def ParseParamData(param:str, operate:str, scaleHelper:ScaleHelper):
 
 def ParseCsv(path:str, fileName:str, scaleHelper:ScaleHelper) -> dict:
     dataDict = dict()
-    with open(f'{path}/{fileName}', mode='r', encoding='utf-8') as csvfile:
+    csv_path = Path(path) / fileName
+    with open(csv_path, mode='r', encoding='utf-8') as csvfile:
         # 使用csv.DictReader读取CSV文件，它将每一行转换为一个字典
         reader = csv.DictReader(csvfile)
         # 遍历CSV文件中的每一行

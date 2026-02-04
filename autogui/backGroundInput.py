@@ -9,6 +9,7 @@ import numpy as np
 import cv2
 import pyautogui
 import pyscreeze
+from pathlib import Path
 from . import log
 from .baseInput import BaseInput
 
@@ -419,4 +420,13 @@ class BackGroundInput(BaseInput):
         # self.deactivate()
 
     def SaveScreenshot(self, fileName: str, img):
-        cv2.imwrite(f'{SAVE_SCREENSHOT_PATH}/{fileName}-{time.strftime("%m%d%H%M%S", time.localtime())}.png', img)
+        if not SAVE_SCREENSHOT_PATH:
+            return
+
+        out_path = Path(SAVE_SCREENSHOT_PATH) / f'{fileName}-{time.strftime("%m%d%H%M%S", time.localtime())}.png'
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        ok, buf = cv2.imencode('.png', img)
+        if not ok:
+            raise ValueError(f"Failed to encode screenshot to PNG: {out_path!s}")
+        out_path.write_bytes(buf.tobytes())

@@ -1,4 +1,6 @@
 import cv2
+import os
+import numpy as np
 
 class ScaleHelper:
     def __init__(self):
@@ -67,7 +69,13 @@ class ScaleHelper:
             raise Exception("整数格式错误")
 
     def getScaleImg(self, imgPath):
-        img = cv2.imread(imgPath, cv2.IMREAD_COLOR)
+        imgPath = os.fspath(imgPath)
+        buf = np.fromfile(imgPath, dtype=np.uint8)
+        if buf.size == 0:
+            raise FileNotFoundError(f"图片文件找不到: {imgPath!r}")
+        img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError(f"图片文件解码失败: {imgPath!r}")
 
         if not self.scale_image or not self.need_scale:
             return img
