@@ -61,7 +61,7 @@ class ScreenshotMode:
         filepath = os.path.join(screenshotDir, filename)
         screenshot.save(filepath)
 
-        threading.Thread(target=lambda: winsound.Beep(200, 100), daemon=True).start()
+        threading.Thread(target=lambda: winsound.MessageBeep(winsound.MB_ICONHAND), daemon=True).start()
         log.info(f"截图已保存: {filepath}")
 
     def PressMousePosition(self):

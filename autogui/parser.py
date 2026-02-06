@@ -19,7 +19,7 @@ def GetCsv(path:str, scaleHelper:ScaleHelper, fileName:str = "main.csv") -> dict
 def ParseParamData(param:str, operate:str, scaleHelper:ScaleHelper):
     param_data = None
     match operate:
-        case 'click' | 'mDown' | 'mUp' | 'press' | 'kDown' | 'kUp' | 'write':
+        case 'click' | 'mDown' | 'mUp' | 'press' | 'kDown' | 'kUp' | 'write' | 'notify':
             param_data = param
         case 'pic' | 'ocr':
             param_data = param.split(";")

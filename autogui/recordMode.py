@@ -47,7 +47,7 @@ class RecordMode:
         log.info('开始录制...')
         self._events = []
         self._last_time = time.time()
-        threading.Thread(target=lambda: winsound.Beep(200, 100), daemon=True).start()
+        threading.Thread(target=lambda: winsound.MessageBeep(winsound.MB_ICONHAND), daemon=True).start()
         # 注册钩子
         try:
             self._kbd_hook = keyboard.hook(log.wrap_callback(self._on_keyboard_event, self._log_binding))
@@ -65,7 +65,7 @@ class RecordMode:
 
     def StopRecord(self):
         log.info('停止录制，准备保存...')
-        threading.Thread(target=lambda: winsound.Beep(200, 100), daemon=True).start()
+        threading.Thread(target=lambda: winsound.MessageBeep(winsound.MB_ICONHAND), daemon=True).start()
         # 取消钩子
         try:
             if self._kbd_hook is not None:

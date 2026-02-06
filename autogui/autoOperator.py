@@ -1,4 +1,3 @@
-import winsound
 import pyautogui
 import pydirectinput
 import pyperclip
@@ -9,6 +8,7 @@ import re
 import threading
 from pathlib import Path
 from . import log
+from . import notifier
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
@@ -291,11 +291,7 @@ class AutoOperator:
                 case 'ocr':
                     operationWait, indexChangeFunc, operationWaitRandom = self.Ocr(operation)
                 case 'notify':
-                    #todo 用通知实现
-                    def _notify():
-                        winsound.Beep(200, 500)
-                        winsound.Beep(200, 500)
-                    threading.Thread(target=_notify, daemon=True).start()
+                    notifier.notify(operateParam, beep=True)
 
         except Exception as e:
             raise e

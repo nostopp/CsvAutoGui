@@ -90,7 +90,7 @@
 | write | text | 键盘输入（参数必须） |
 | pic | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | 识图 |
 | ocr | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | OCR 识别 |
-| notify | text | 通知(当前text不生效,用系统提示音来替代) |
+| notify | text | 通知 |
 
 ---
 
