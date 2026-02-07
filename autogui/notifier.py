@@ -25,7 +25,7 @@ def _show_tk_popup(text: str, width: int = 210, height: int = 120):
     root.mainloop()
 
 
-def _init_popup_window(win, text: str, width: int, height: int, on_destroy=None):
+def _init_popup_window(win:tk.Toplevel, text: str, width: int, height: int, on_destroy=None):
     try:
         win.overrideredirect(True)
     except Exception:
@@ -80,11 +80,10 @@ def _init_popup_window(win, text: str, width: int, height: int, on_destroy=None)
 
     win.bind("<FocusOut>", _close)
     win.bind("<Escape>", _close)
+    win.bind("<Deactivate>", _close)
 
     try:
-        win.deiconify()
         win.lift()
-        win.focus_force()
     except Exception:
         pass
 
@@ -96,6 +95,11 @@ def _init_popup_window(win, text: str, width: int, height: int, on_destroy=None)
 
     try:
         win.after(250, _drop_topmost)
+    except Exception:
+        pass
+
+    try:
+        win.after(3000, _close)
     except Exception:
         pass
 
