@@ -159,13 +159,21 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
             subOperatorList: list[autogui.AutoOperator] = []
             mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH, scale_helper), CONFIG_PATH, subOperatorList, input_obj, scale_helper, LOOP, PRINT_LOG)
 
+            main_finished = False
+            subOperator = None
             while not local_stop.is_set():
                 if len(subOperatorList) > 0:
-                    if not subOperatorList[-1].Update():
-                        subOperatorList.pop()
+                    idx = len(subOperatorList) - 1
+                    subOperator = subOperatorList[idx]
+                    if not subOperator.Update():
+                        subOperatorList.pop(idx)
+
                 else:
-                    if not mainOperator.Update():
+                    if main_finished:
                         break
+                    if not mainOperator.Update():
+                        main_finished = True
+
     except Exception as e:
         log.error(f"运行时抛出异常: {e}")
     finally:
