@@ -19,8 +19,15 @@ def GetCsv(path:str, scaleHelper:ScaleHelper, fileName:str = "main.csv") -> dict
 def ParseParamData(param:str, operate:str, scaleHelper:ScaleHelper):
     param_data = None
     match operate:
-        case 'click' | 'mDown' | 'mUp' | 'press' | 'kDown' | 'kUp' | 'write' | 'notify' | 'jmp':
+        case 'click' | 'mDown' | 'mUp' | 'press' | 'kDown' | 'kUp' | 'write' | 'notify':
             param_data = param
+        case 'jmp':
+            param_data = param
+            try:
+                param_data = int(param_data)
+            except:
+                pass
+
         case 'pic' | 'ocr':
             param_data = param.split(";")
             if len(param_data) == 3:
