@@ -292,6 +292,11 @@ class AutoOperator:
                     operationWait, indexChangeFunc, operationWaitRandom = self.Ocr(operation)
                 case 'notify':
                     notifier.notify(operateParam, beep=True)
+                case 'jmp':
+                    jmp = self.Jump(operateParam)
+                    if self._printLog:
+                        log.debug(f'跳转 {operateParam}, 实际跳转到 {jmp}')
+                    return None, lambda x : jmp, None
 
         except Exception as e:
             raise e

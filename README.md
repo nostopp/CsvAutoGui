@@ -91,6 +91,7 @@
 | pic | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | 识图 |
 | ocr | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | OCR 识别 |
 | notify | text | 通知 |
+| jmp | index | 跳转 |
 
 ---
 
