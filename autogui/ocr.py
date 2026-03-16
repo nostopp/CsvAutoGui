@@ -215,7 +215,7 @@ def OCR(findStr:str, input:BaseInput, findRegion=None, confidence:float = 0.8) -
     else:
         xCenter, yCenter, width, height = FindTextInResult(result, findStr, confidence)
 
-    if xCenter and yCenter and findRegion and len(findRegion) == 4:
+    if xCenter != None and yCenter != None and findRegion and len(findRegion) == 4:
         xCenter += findRegion[0]
         yCenter += findRegion[1]
 
