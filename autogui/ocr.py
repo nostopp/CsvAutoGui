@@ -146,7 +146,7 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
         if shouldLog():
             log.debug(f'OCR识别到文本: "{text}" 置信度: {score}, 匹配使用: {use_text}')
         if findStr in use_text and score >= confidence:
-            return GetTargetCenter(boxes[i], findStr, text)
+            return GetTargetCenter(boxes[i], findStr, use_text)
     
     return None, None, None, None
 
