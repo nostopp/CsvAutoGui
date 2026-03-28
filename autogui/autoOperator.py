@@ -74,6 +74,7 @@ class AutoOperator:
         try:
             confidence = 0.8 if not "confidence" in operation else operation['confidence']
             region = None if not 'pic_region' in operation else operation['pic_region']
+            grayscale = False if 'disable_grayscale' in operation else None
 
             if not 'search_pic_cache' in operation:
                 img_path = Path(self._configPath) / operation["search_pic"]
@@ -81,7 +82,7 @@ class AutoOperator:
                 operation['search_pic_cache'] = img
             else:
                 img = operation['search_pic_cache']
-            center = self._input.locateCenterOnScreen(img, confidence=confidence, region=region)            
+            center = self._input.locateCenterOnScreen(img, confidence=confidence, region=region, grayscale=grayscale)
 
             if self._printLog:
                 log.debug(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}')

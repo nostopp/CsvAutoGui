@@ -71,6 +71,9 @@ def ParseCsv(path:str, fileName:str, scaleHelper:ScaleHelper) -> dict:
                 value['pic_region'] = region
             if CheckValueInCsv(row, '图片/ocr置信度'):
                 value['confidence'] = float(row['图片/ocr置信度'])
+            if CheckValueInCsv(row, '图片不使用灰度匹配'):
+                if int(row['图片不使用灰度匹配']) == 1:
+                    value['disable_grayscale'] = True
             if CheckValueInCsv(row, '完成后等待时间'):
                 if ';' in row['完成后等待时间']:
                     param = str.split(row['完成后等待时间'], ';')
