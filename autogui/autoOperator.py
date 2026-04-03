@@ -31,6 +31,63 @@ class AutoOperator:
             if 'jump_mark' in operation:
                 self._jumpMarks[operation['jump_mark']] = index
 
+    def _start_sub_operator(self, file_name: str):
+        if self._printLog:
+            log.debug(f'启动配置 {file_name}')
+        self._subOperatorList.append(
+            AutoOperator(
+                GetCsv(self._configPath, self._scaleHelper, file_name),
+                self._configPath,
+                self._subOperatorList,
+                self._input,
+                self._scaleHelper,
+                False,
+                self._printLog,
+            )
+        )
+
+    def _jump_to(self, target: int | str):
+        jump = self.Jump(target)
+        if self._printLog:
+            log.debug(f'跳转 {target}, 实际跳转到 {jump}')
+        return None, lambda x : jump, None
+
+    def _handle_branch_result(self, operateParam, matched: bool):
+        if not operateParam:
+            return None
+
+        trigger = operateParam[0]
+
+        if matched:
+            if trigger == 'exist':
+                if len(operateParam) <= 2:
+                    self._start_sub_operator(operateParam[1])
+                    return None, None, None
+                return self._jump_to(operateParam[1])
+
+            if len(operateParam) <= 2:
+                return None, None, None
+            return self._jump_to(operateParam[2])
+
+        if trigger == 'notExist':
+            if len(operateParam) <= 2:
+                self._start_sub_operator(operateParam[1])
+                return None, None, None
+            return self._jump_to(operateParam[1])
+
+        if len(operateParam) <= 2:
+            return None, None, None
+        return self._jump_to(operateParam[2])
+
+    def _move_to_match(self, operation:dict, center_x: int, center_y: int, width: int, height: int):
+        if not 'pic_range_random' in operation:
+            self._input.moveTo(center_x, center_y, operation.get('move_time', None))
+            return
+
+        startX = center_x - width / 2
+        startY = center_y - height / 2
+        self._input.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
+
     def Update(self) -> bool:
         if len(self._operateDict) <= 0:
             return False
@@ -95,62 +152,17 @@ class AutoOperator:
                     log.debug(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
             
             if operateParam:
-                match operateParam[0]:
-                    case 'notExist':
-                        if len(operateParam) <= 2:
-                            if self._printLog:
-                                log.debug(f'启动配置 {operateParam[1]}')
-                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, self._scaleHelper, operateParam[1]), self._configPath, self._subOperatorList, self._input, self._scaleHelper, False, self._printLog))
-
-                            return None, None, None
-                        else:
-                            jump = self.Jump(operateParam[1])
-                            if self._printLog:
-                                log.debug(f'跳转 {operateParam[1]}, 实际跳转到 {jump}')
-                            return None, lambda x : jump, None
-
-                    case 'exist':
-                        if len(operateParam) <= 2:
-                            return None, None, None
-                        else:
-                            jump = self.Jump(operateParam[2])
-                            if self._printLog:
-                                log.debug(f'跳转 {operateParam[2]}, 实际跳转到 {jump}')
-                            return None, lambda x : jump, None
+                return self._handle_branch_result(operateParam, matched=False)
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         except Exception as e:
             raise e
         else:
             if not operateParam:
-                if not 'pic_range_random' in operation:
-                    self._input.moveTo(center.x, center.y, operation.get('move_time', None))
-                else:
-                    height, width = img.shape[:2]
-                    startX = center.x - width / 2
-                    startY = center.y - height / 2
-                    self._input.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
+                height, width = img.shape[:2]
+                self._move_to_match(operation, center.x, center.y, width, height)
             else:
-                if operateParam[0] == 'exist':
-                    if len(operateParam) <= 2:
-                        if self._printLog:
-                            log.debug(f'启动配置 {operateParam[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, self._scaleHelper, operateParam[1]), self._configPath, self._subOperatorList, self._input, self._scaleHelper, False, self._printLog))
-                        
-                        return None, None, None
-                    else:
-                        jump = self.Jump(operateParam[1])
-                        if self._printLog:
-                            log.debug(f'跳转 {operateParam[1]}, 实际跳转到 {jump}')
-                        return None, lambda x : jump, None
-                else:
-                    if len(operateParam) <= 2:
-                        return None, None, None
-                    else:
-                        jump = self.Jump(operateParam[2])
-                        if self._printLog:
-                            log.debug(f'跳转 {operateParam[2]}, 实际跳转到 {jump}')
-                        return None, lambda x : jump, None
+                return self._handle_branch_result(operateParam, matched=True)
 
             return None, None, None
 
@@ -173,28 +185,7 @@ class AutoOperator:
                 log.debug(f'ocr {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
 
             if operateParam:
-                match operateParam[0]:
-                    case 'notExist':
-                        if len(operateParam) <= 2:
-                            if self._printLog:
-                                log.debug(f'启动配置 {operateParam[1]}')
-                            self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, self._scaleHelper, operateParam[1]), self._configPath, self._subOperatorList, self._input, self._scaleHelper, False, self._printLog))
-
-                            return None, None, None
-                        else:
-                            jump = self.Jump(operateParam[1])
-                            if self._printLog:
-                                log.debug(f'跳转 {operateParam[1]}, 实际跳转到 {jump}')
-                            return None, lambda x : jump, None
-
-                    case 'exist':
-                        if len(operateParam) <= 2:
-                            return None, None, None
-                        else:
-                            jump = self.Jump(operateParam[2])
-                            if self._printLog:
-                                log.debug(f'跳转 {operateParam[2]}, 实际跳转到 {jump}')
-                            return None, lambda x : jump, None
+                return self._handle_branch_result(operateParam, matched=False)
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
         else:
@@ -202,33 +193,9 @@ class AutoOperator:
                 log.debug(f'ocr {operation["search_pic"]}, 用时: {time.time()-startTime:.2f}, 位置: {xCenter},{yCenter}')
 
             if not operateParam:
-                if not 'pic_range_random' in operation:
-                    self._input.moveTo(xCenter, yCenter, operation.get('move_time', None))
-                else:
-                    startX = xCenter - width / 2
-                    startY = yCenter - height / 2
-                    self._input.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
+                self._move_to_match(operation, xCenter, yCenter, width, height)
             else:
-                if operateParam[0] == 'exist':
-                    if len(operateParam) <= 2:
-                        if self._printLog:
-                            log.debug(f'启动配置 {operateParam[1]}')
-                        self._subOperatorList.append(AutoOperator(GetCsv(self._configPath, self._scaleHelper, operateParam[1]), self._configPath, self._subOperatorList, self._input, self._scaleHelper, False, self._printLog))
-                        
-                        return None, None, None
-                    else:
-                        jump = self.Jump(operateParam[1])
-                        if self._printLog:
-                            log.debug(f'跳转 {operateParam[1]}, 实际跳转到 {jump}')
-                        return None, lambda x : jump, None
-                else:
-                    if len(operateParam) <= 2:
-                        return None, None, None
-                    else:
-                        jump = self.Jump(operateParam[2])
-                        if self._printLog:
-                            log.debug(f'跳转 {operateParam[2]}, 实际跳转到 {jump}')
-                        return None, lambda x : jump, None
+                return self._handle_branch_result(operateParam, matched=True)
 
             return None, None, None
 
