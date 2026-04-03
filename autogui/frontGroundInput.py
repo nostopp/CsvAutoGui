@@ -41,7 +41,7 @@ class FrontGroundInput(BaseInput):
         end = start + np.array([xOffset, yOffset])
         self.continueMoveTo(start, end, duration)
 
-    def continueMoveTo(start:np.array, end:np.array, duration):
+    def continueMoveTo(self, start:np.array, end:np.array, duration):
         steps = max(1, int(duration * MOVE_FPS))
         delta = end - start
         start_time = time.perf_counter()

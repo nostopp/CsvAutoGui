@@ -52,13 +52,13 @@ class RecordMode:
         try:
             self._kbd_hook = keyboard.hook(log.wrap_callback(self._on_keyboard_event, self._log_binding))
         except Exception as e:
-            log.error('无法挂载 keyboard 钩子:', e)
+            log.error(f'无法挂载 keyboard 钩子: {e}')
             self._kbd_hook = None
 
         try:
             self._mouse_hook = mouse.hook(log.wrap_callback(self._on_mouse_event, self._log_binding))
         except Exception as e:
-            log.error('无法挂载 mouse 钩子:', e)
+            log.error(f'无法挂载 mouse 钩子: {e}')
             self._mouse_hook = None
 
         self._recording = True
@@ -209,7 +209,7 @@ class RecordMode:
                     idx += 1
             log.info(f'录制文件已保存: {filepath}')
         except Exception as e:
-            log.error('保存 CSV 出错:', e)
+            log.error(f'保存 CSV 出错: {e}')
 
     def Update(self):
         # 供主循环调用，简单 sleep 即可

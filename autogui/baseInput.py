@@ -17,7 +17,7 @@ class BaseInput:
         pass
     def moveRel(self, xOffset, yOffset, duration=None):
         pass
-    def continueMoveTo(start:np.array, end:np.array, duration):
+    def continueMoveTo(self, start:np.array, end:np.array, duration):
         pass
     def click(self, button=PRIMARY):
         pass

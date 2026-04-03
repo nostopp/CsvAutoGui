@@ -136,7 +136,7 @@ class BackGroundInput(BaseInput):
             self._mouse_y = int(self._screen_height // 2)
         else:
             log.error(f"未找到窗口: {window_title}")
-            return None
+            raise ValueError(f"未找到窗口: {window_title}")
     
     def findWindowRecursive(self, parent_hwnd, class_name):
         result_hwnd = [None]  # 使用列表来在回调函数中传递引用

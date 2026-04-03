@@ -18,7 +18,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--log", action="store_true", help="是否打印日志", default=False)
     parser.add_argument("-s", "--screenshots", action="store_true", help="截图模式", default=False)
     parser.add_argument("--scale", help="与配置所用分辨率的缩放值", default=1.0, type=float)
-    parser.add_argument("--scale_image", help="缩放时是否缩放用到的截图", default=False, type=bool)
+    parser.add_argument("--scale_image", action="store_true", help="缩放时是否缩放用到的截图", default=False)
     parser.add_argument("--offset", help="搜索时需要的偏移值", default="0;0", type=str)
     parser.add_argument("-t", "--title", help="目标窗口名称,指定后程序运行在后台窗口模式", default=None, type=str)
     parser.add_argument("-m", "--multi_window", action="store_true", help="后台窗口多窗口控件模式", default=False)
@@ -118,6 +118,7 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
         # autogui.ScaleHelper.Instance().Init(args.scale, args.offset, args.scale_image)
     except Exception as e:
         log.error(f"ScaleHelper init 失败: {e}")
+        raise ValueError(f"ScaleHelper init 失败: scale={args.scale}, offset={args.offset}, scale_image={args.scale_image}") from e
 
     if autogui.backGroundInput.SAVE_SCREENSHOT:
         autogui.backGroundInput.SAVE_SCREENSHOT_PATH = CONFIG_PATH
