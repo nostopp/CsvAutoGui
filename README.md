@@ -29,10 +29,10 @@
 
 | 参数 | 说明 | 默认值 |
 | :-: | :-: | :-: |
-| -p / --path | 指定配置文件夹路径 | config/test |
+| -c / --config | 指定配置文件夹路径 | config/test |
 | -l / --loop | 自动化是否循环 | False |
 | --log | 是否打印日志 | False |
-| -s / --screen | 运行在截图模式 | False |
+| -s / --screenshots | 运行在截图模式 | False |
 | --record | 运行在记录操作模式 | False |
 | --scale | 运行分辨率与配置分辨率的比值 | 1 |
 | --scale_image | 缩放时是否缩放用到的截图 | False |

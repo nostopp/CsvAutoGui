@@ -17,12 +17,14 @@ class InstanceEntry:
         self.stop_event = threading.Event()
         self.logs = []
         self.running = False
+        self.restart_pending = False
 
 
 class MainWindow:
     def __init__(self, root:tk.Tk):
         self.root = root
         root.title('CsvAutoGui Manager')
+        self._closing = False
 
         # 配置 ttk 样式
         style = ttk.Style()
@@ -145,11 +147,28 @@ class MainWindow:
     
     def on_closing(self):
         """窗口关闭时的清理工作"""
+        if self._closing:
+            return
+        self._closing = True
         try:
             keyboard.remove_hotkey('ctrl+shift+x')
         except Exception:
             pass
-        self.root.destroy()
+        self.stop_all()
+        self._poll_close_instances()
+
+    def _poll_close_instances(self, remaining_checks=30):
+        running_instances = [inst for inst in self.instances.values() if inst.running]
+        if not running_instances:
+            self.root.destroy()
+            return
+
+        if remaining_checks <= 0:
+            messagebox.showwarning('Warning', '仍有实例未完全退出，窗口将关闭')
+            self.root.destroy()
+            return
+
+        self.root.after(100, lambda: self._poll_close_instances(remaining_checks - 1))
 
     def build_args(self):
         # 构造 argparse.Namespace 兼容对象
@@ -291,17 +310,32 @@ class MainWindow:
             messagebox.showinfo('Info', '未选择实例')
             return
         
-        # 先停止实例（如果未停止）
-        if inst.running:
-            inst.stop_event.set()
-            # 等待实例停止（最多等 3 秒）
-            for _ in range(30):
-                if not inst.running:
-                    break
-                threading.Event().wait(0.1)
-        
-        # 使用相同参数启动新实例
-        self._start_instance_with_args(inst.args)
+        if not inst.running:
+            self._start_instance_with_args(inst.args)
+            return
+
+        if inst.restart_pending:
+            return
+
+        inst.restart_pending = True
+        inst.stop_event.set()
+        self._poll_restart_instance(inst)
+
+    def _poll_restart_instance(self, inst, remaining_checks=30):
+        if not inst.restart_pending:
+            return
+
+        if not inst.running:
+            inst.restart_pending = False
+            self._start_instance_with_args(inst.args)
+            return
+
+        if remaining_checks <= 0:
+            inst.restart_pending = False
+            messagebox.showwarning('Warning', '实例停止超时，未执行重启')
+            return
+
+        self.root.after(100, lambda: self._poll_restart_instance(inst, remaining_checks - 1))
 
     def clear_instances(self):
         """清空所有 instances（停止并移除）"""

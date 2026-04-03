@@ -150,13 +150,11 @@ class AutoOperator:
                     log.debug(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}, 置信度: {match.group(1)}')
                 else:
                     log.debug(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
-            
+
             if operateParam:
                 return self._handle_branch_result(operateParam, matched=False)
 
             return 1 if not 'pic_retry_time' in operation else operation['pic_retry_time'], lambda x : x, None if not 'pic_retry_time_random' in operation else operation['pic_retry_time_random']
-        except Exception as e:
-            raise e
         else:
             if not operateParam:
                 height, width = img.shape[:2]
@@ -203,71 +201,67 @@ class AutoOperator:
         operationWait = None
         indexChangeFunc = None
         operationWaitRandom = None
-        try:
-            operateParam = None if not 'operate_param' in operation else operation['operate_param']
-            if self._printLog:
-                log.debug(f'操作: {operation["operate"]}, 参数: {operateParam}')
-            match operation['operate']:
-                case 'click':
-                    if operateParam:
-                        self._input.click(button=operateParam)
-                    else:
-                        self._input.click()
-                case 'mDown':
-                    if operateParam:
-                        self._input.mouseDown(button=operateParam)
-                    else:
-                        self._input.mouseDown()
-                case 'mUp':
-                    if operateParam:
-                        self._input.mouseUp(button=operateParam)
-                    else:
-                        self._input.mouseUp()
-                case 'mMove':
-                    if operateParam:
-                        self._input.moveRel(operateParam[0], operateParam[1], operation.get('move_time', None))
-                    else:
-                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
-                case 'mMoveTo':
-                    if operateParam:
-                        self._input.moveTo(operateParam[0], operateParam[1], operation.get('move_time', None))
-                    else:
-                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
-                case 'press':
-                    if operateParam:
-                        self._input.press(operateParam)
-                    else:
-                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
-                case 'kDown':
-                    if operateParam:
-                        self._input.keyDown(operateParam)
-                    else:
-                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
-                case 'kUp':
-                    if operateParam:
-                        self._input.keyUp(operateParam)
-                    else:
-                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
-                case 'write':
-                    if operateParam:
-                        pyperclip.copy(operateParam)
-                        self._input.hotkey('ctrl', 'v')
-                    else:
-                        raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
-                case 'pic':
-                    operationWait, indexChangeFunc, operationWaitRandom = self.SearchPic(operation)
-                case 'ocr':
-                    operationWait, indexChangeFunc, operationWaitRandom = self.Ocr(operation)
-                case 'notify':
-                    notifier.notify(operateParam, beep=True)
-                case 'jmp':
-                    jmp = self.Jump(operateParam)
-                    if self._printLog:
-                        log.debug(f'跳转 {operateParam}, 实际跳转到 {jmp}')
-                    return None, lambda x : jmp, None
-
-        except Exception as e:
-            raise e
+        operateParam = None if not 'operate_param' in operation else operation['operate_param']
+        if self._printLog:
+            log.debug(f'操作: {operation["operate"]}, 参数: {operateParam}')
+        match operation['operate']:
+            case 'click':
+                if operateParam:
+                    self._input.click(button=operateParam)
+                else:
+                    self._input.click()
+            case 'mDown':
+                if operateParam:
+                    self._input.mouseDown(button=operateParam)
+                else:
+                    self._input.mouseDown()
+            case 'mUp':
+                if operateParam:
+                    self._input.mouseUp(button=operateParam)
+                else:
+                    self._input.mouseUp()
+            case 'mMove':
+                if operateParam:
+                    self._input.moveRel(operateParam[0], operateParam[1], operation.get('move_time', None))
+                else:
+                    raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+            case 'mMoveTo':
+                if operateParam:
+                    self._input.moveTo(operateParam[0], operateParam[1], operation.get('move_time', None))
+                else:
+                    raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+            case 'press':
+                if operateParam:
+                    self._input.press(operateParam)
+                else:
+                    raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+            case 'kDown':
+                if operateParam:
+                    self._input.keyDown(operateParam)
+                else:
+                    raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+            case 'kUp':
+                if operateParam:
+                    self._input.keyUp(operateParam)
+                else:
+                    raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+            case 'write':
+                if operateParam:
+                    pyperclip.copy(operateParam)
+                    self._input.hotkey('ctrl', 'v')
+                else:
+                    raise Exception(f"{operation['index']},{operation['operate']} 操作参数错误")
+            case 'pic':
+                operationWait, indexChangeFunc, operationWaitRandom = self.SearchPic(operation)
+            case 'ocr':
+                operationWait, indexChangeFunc, operationWaitRandom = self.Ocr(operation)
+            case 'notify':
+                notifier.notify(operateParam, beep=True)
+            case 'jmp':
+                jmp = self.Jump(operateParam)
+                if self._printLog:
+                    log.debug(f'跳转 {operateParam}, 实际跳转到 {jmp}')
+                return None, lambda x : jmp, None
 
         return operationWait, indexChangeFunc, operationWaitRandom
 
