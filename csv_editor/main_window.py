@@ -3,12 +3,14 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QMimeData, Qt, Signal
 from PySide6.QtGui import QAction, QGuiApplication, QKeySequence, QPixmap, QUndoStack
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QDialogButtonBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -39,6 +41,15 @@ from csv_editor.domain.models import BranchConfig, EditorDocument, FlowDocument,
 from csv_editor.io.assets import save_capture_image
 from csv_editor.io.csv_codec import CsvEditorCodec
 from csv_editor.io.editor_state import EditorStateRepository
+from csv_editor.io.node_clipboard import (
+    CLIPBOARD_MIME_TYPE,
+    CLIPBOARD_TEXT_PREFIX,
+    NodeClipboardPayload,
+    build_clipboard_payload,
+    clone_nodes_for_paste,
+    deserialize_clipboard_payload,
+    serialize_clipboard_payload,
+)
 from csv_editor.services.capture import capture_point, capture_region
 from csv_editor.services.asset_usage import find_unused_images
 from csv_editor.services.summary import summarize_node
@@ -72,13 +83,17 @@ class EditorMainWindow(QMainWindow):
         self.open_action = QAction("打开配置目录", self)
         self.save_action = QAction("保存 CSV", self)
         self.reload_action = QAction("重新加载", self)
+        self.import_nodes_action = QAction("从其他自动化复制节点…", self)
         self.scan_unused_images_action = QAction("扫描未使用图片", self)
         self.undo_action = self.undo_stack.createUndoAction(self, "撤销")
-        self.undo_action.setShortcut(QKeySequence.Undo)
+        self.undo_action.setShortcut(QKeySequence("Ctrl+Z"))
         self.redo_action = self.undo_stack.createRedoAction(self, "重做")
-        self.redo_action.setShortcut(QKeySequence.Redo)
+        self.redo_action.setShortcut(QKeySequence("Ctrl+Shift+Z"))
         self.add_node_action = QAction("新增节点", self)
-        self.duplicate_node_action = QAction("复制节点", self)
+        self.copy_nodes_action = QAction("复制节点", self)
+        self.copy_nodes_action.setShortcut(QKeySequence("Ctrl+C"))
+        self.paste_nodes_action = QAction("粘贴节点", self)
+        self.paste_nodes_action.setShortcut(QKeySequence("Ctrl+V"))
         self.delete_node_action = QAction("删除节点", self)
         self.move_up_action = QAction("上移", self)
         self.move_down_action = QAction("下移", self)
@@ -89,13 +104,16 @@ class EditorMainWindow(QMainWindow):
         menu.addAction(self.open_action)
         menu.addAction(self.save_action)
         menu.addAction(self.reload_action)
+        menu.addSeparator()
+        menu.addAction(self.import_nodes_action)
 
         edit_menu = self.menuBar().addMenu("编辑")
         edit_menu.addAction(self.undo_action)
         edit_menu.addAction(self.redo_action)
         edit_menu.addSeparator()
         edit_menu.addAction(self.add_node_action)
-        edit_menu.addAction(self.duplicate_node_action)
+        edit_menu.addAction(self.copy_nodes_action)
+        edit_menu.addAction(self.paste_nodes_action)
         edit_menu.addAction(self.delete_node_action)
         edit_menu.addSeparator()
         edit_menu.addAction(self.move_up_action)
@@ -109,10 +127,12 @@ class EditorMainWindow(QMainWindow):
         toolbar.addAction(self.save_action)
         toolbar.addAction(self.undo_action)
         toolbar.addAction(self.redo_action)
+        toolbar.addAction(self.import_nodes_action)
         toolbar.addAction(self.scan_unused_images_action)
         toolbar.addSeparator()
         toolbar.addAction(self.add_node_action)
-        toolbar.addAction(self.duplicate_node_action)
+        toolbar.addAction(self.copy_nodes_action)
+        toolbar.addAction(self.paste_nodes_action)
         toolbar.addAction(self.delete_node_action)
         toolbar.addAction(self.move_up_action)
         toolbar.addAction(self.move_down_action)
@@ -141,7 +161,7 @@ class EditorMainWindow(QMainWindow):
         self.node_table.setHorizontalHeaderLabels(["序号", "类型", "跳转标记", "摘要", "备注"])
         self.node_table.verticalHeader().setVisible(False)
         self.node_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.node_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.node_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.node_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.node_table.horizontalHeader().setStretchLastSection(True)
         self.node_table.setMinimumWidth(520)
@@ -178,9 +198,11 @@ class EditorMainWindow(QMainWindow):
         self.open_action.triggered.connect(self.choose_config_folder)
         self.save_action.triggered.connect(self.save_document)
         self.reload_action.triggered.connect(self.reload_document)
+        self.import_nodes_action.triggered.connect(self.import_nodes_from_external_project)
         self.scan_unused_images_action.triggered.connect(self.show_unused_images_dialog)
         self.add_node_action.triggered.connect(self.add_node)
-        self.duplicate_node_action.triggered.connect(self.duplicate_node)
+        self.copy_nodes_action.triggered.connect(self.copy_selected_nodes)
+        self.paste_nodes_action.triggered.connect(self.paste_nodes)
         self.delete_node_action.triggered.connect(self.delete_node)
         self.move_up_action.triggered.connect(self.move_node_up)
         self.move_down_action.triggered.connect(self.move_node_down)
@@ -489,36 +511,60 @@ class EditorMainWindow(QMainWindow):
         target_index = len(flow.nodes) if insert_at < 0 else insert_at + 1
         self.undo_stack.push(InsertNodeCommand(self, flow.filename, node, target_index, "新增节点"))
 
-    def duplicate_node(self) -> None:
+    def copy_selected_nodes(self) -> None:
         flow = self.current_flow
-        node = self.current_node
-        if not flow or not node:
+        if not self.document or not flow:
+            return
+        selected_rows = self._selected_row_indexes(self.node_table)
+        if not selected_rows:
+            QMessageBox.information(self, "复制节点", "请先选择要复制的节点。")
+            return
+        if not self._is_contiguous_selection(selected_rows):
+            QMessageBox.information(self, "复制节点", "当前仅支持连续多选复制。")
+            return
+        nodes = [flow.nodes[row] for row in selected_rows]
+        self._write_nodes_to_clipboard(build_clipboard_payload(self.document.root_path, flow.filename, nodes))
+        self.statusBar().showMessage(f"已复制 {len(nodes)} 个节点", 3000)
+
+    def paste_nodes(self) -> None:
+        flow = self.current_flow
+        if not flow:
+            return
+        payload = self._read_nodes_from_clipboard()
+        if payload is None or not payload.nodes:
+            QMessageBox.information(self, "粘贴节点", "剪贴板中没有可粘贴的节点数据。")
             return
 
-        duplicate = OperationNode(
-            operation=node.operation,
-            param_text=node.param_text,
-            wait_value=node.wait_value,
-            wait_random=node.wait_random,
-            search_target=node.search_target,
-            region_text=node.region_text,
-            confidence_text=node.confidence_text,
-            retry_value=node.retry_value,
-            retry_random=node.retry_random,
-            pic_range_random=node.pic_range_random,
-            move_time=node.move_time,
-            jump_mark="",
-            disable_grayscale=node.disable_grayscale,
-            note=node.note,
-            branch=BranchConfig(
-                trigger=node.branch.trigger,
-                mode=node.branch.mode,
-                primary_target=node.branch.primary_target,
-                secondary_target=node.branch.secondary_target,
-            ),
+        paste_nodes, renamed_marks = clone_nodes_for_paste(payload.nodes, flow)
+        insert_at = self.node_table.currentRow()
+        target_index = len(flow.nodes) if insert_at < 0 else insert_at + 1
+        self.undo_stack.beginMacro("粘贴节点")
+        try:
+            for offset, node in enumerate(paste_nodes):
+                self.undo_stack.push(InsertNodeCommand(self, flow.filename, node, target_index + offset, "粘贴节点"))
+        finally:
+            self.undo_stack.endMacro()
+
+        message = f"已粘贴 {len(paste_nodes)} 个节点"
+        if renamed_marks:
+            message = f"{message}，并自动重命名了 {len(renamed_marks)} 个跳转标记"
+        self.statusBar().showMessage(message, 4000)
+
+    def import_nodes_from_external_project(self) -> None:
+        if not self.document:
+            QMessageBox.information(self, "未打开配置", "请先打开一个目标配置目录。")
+            return
+        dialog = ExternalNodeImportDialog(self.codec, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        payload = dialog.selected_payload()
+        if payload is None:
+            return
+        self._write_nodes_to_clipboard(payload)
+        self.statusBar().showMessage(
+            f"已从 {payload.source_flow} 复制 {len(payload.nodes)} 个节点到剪贴板，请切回目标流程粘贴",
+            5000,
         )
-        index = flow.nodes.index(node)
-        self.undo_stack.push(InsertNodeCommand(self, flow.filename, duplicate, index + 1, "复制节点"))
 
     def delete_node(self) -> None:
         flow = self.current_flow
@@ -550,7 +596,8 @@ class EditorMainWindow(QMainWindow):
         menu = QMenu(self)
         menu.addAction(self.add_node_action)
         menu.addSeparator()
-        menu.addAction(self.duplicate_node_action)
+        menu.addAction(self.copy_nodes_action)
+        menu.addAction(self.paste_nodes_action)
         menu.addAction(self.delete_node_action)
         menu.addSeparator()
         menu.addAction(self.move_up_action)
@@ -562,11 +609,13 @@ class EditorMainWindow(QMainWindow):
             (self.open_action, "打开配置目录"),
             (self.save_action, "保存当前 CSV"),
             (self.reload_action, "重新加载当前配置目录"),
+            (self.import_nodes_action, "从其他自动化选择节点并复制到剪贴板"),
             (self.scan_unused_images_action, "扫描当前配置目录下未使用的图片"),
             (self.undo_action, "撤销上一步操作"),
             (self.redo_action, "重做上一步撤销的操作"),
             (self.add_node_action, "在当前节点后新增节点"),
-            (self.duplicate_node_action, "复制当前节点"),
+            (self.copy_nodes_action, "复制选中的一个或多个节点"),
+            (self.paste_nodes_action, "在当前节点后粘贴剪贴板中的节点"),
             (self.delete_node_action, "删除当前节点"),
             (self.move_up_action, "将当前节点上移"),
             (self.move_down_action, "将当前节点下移"),
@@ -587,6 +636,32 @@ class EditorMainWindow(QMainWindow):
     def _on_undo_stack_index_changed(self, _index: int) -> None:
         self._configure_action_hints()
 
+    def _selected_row_indexes(self, table: QTableWidget) -> list[int]:
+        rows = {index.row() for index in table.selectionModel().selectedRows()} if table.selectionModel() else set()
+        return sorted(row for row in rows if row >= 0)
+
+    @staticmethod
+    def _is_contiguous_selection(rows: list[int]) -> bool:
+        return not rows or rows == list(range(rows[0], rows[-1] + 1))
+
+    def _write_nodes_to_clipboard(self, payload: NodeClipboardPayload) -> None:
+        raw_text = serialize_clipboard_payload(payload)
+        mime_data = QMimeData()
+        mime_data.setData(CLIPBOARD_MIME_TYPE, raw_text.encode("utf-8"))
+        mime_data.setText(f"{CLIPBOARD_TEXT_PREFIX}{raw_text}")
+        QGuiApplication.clipboard().setMimeData(mime_data)
+
+    def _read_nodes_from_clipboard(self) -> NodeClipboardPayload | None:
+        mime_data = QGuiApplication.clipboard().mimeData()
+        if mime_data is None:
+            return None
+        if mime_data.hasFormat(CLIPBOARD_MIME_TYPE):
+            raw_bytes = bytes(mime_data.data(CLIPBOARD_MIME_TYPE))
+            return deserialize_clipboard_payload(raw_bytes.decode("utf-8"))
+        if mime_data.hasText():
+            return deserialize_clipboard_payload(mime_data.text())
+        return None
+
     def show_unused_images_dialog(self) -> None:
         if not self.document:
             QMessageBox.information(self, "未打开配置", "请先打开一个配置目录。")
@@ -600,8 +675,10 @@ class EditorMainWindow(QMainWindow):
             self.redo_action,
             self.save_action,
             self.reload_action,
+            self.import_nodes_action,
             self.add_node_action,
-            self.duplicate_node_action,
+            self.copy_nodes_action,
+            self.paste_nodes_action,
             self.delete_node_action,
             self.move_up_action,
             self.move_down_action,
@@ -640,6 +717,158 @@ class NodeTableWidget(QTableWidget):
             event.accept()
             return
         super().mousePressEvent(event)
+
+
+class ExternalNodeImportDialog(QDialog):
+    def __init__(self, codec: CsvEditorCodec, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.codec = codec
+        self.document: EditorDocument | None = None
+        self.current_flow_name: str | None = None
+        self._selected_payload: NodeClipboardPayload | None = None
+        self.setWindowTitle("从其他自动化复制节点")
+        self.resize(980, 640)
+
+        layout = QVBoxLayout(self)
+
+        top_row = QHBoxLayout()
+        self.path_label = QLabel("未选择来源配置目录")
+        self.path_label.setWordWrap(True)
+        self.choose_button = QPushButton("选择目录")
+        self.choose_button.clicked.connect(self._choose_directory)
+        top_row.addWidget(self.path_label, 1)
+        top_row.addWidget(self.choose_button)
+        layout.addLayout(top_row)
+
+        splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(splitter, 1)
+
+        self.flow_tree = QTreeWidget()
+        self.flow_tree.setHeaderLabels(["来源流程"])
+        self.flow_tree.setMinimumWidth(220)
+        self.flow_tree.itemSelectionChanged.connect(self._on_flow_selection_changed)
+        splitter.addWidget(self.flow_tree)
+
+        self.node_table = NodeTableWidget(0, 5)
+        self.node_table.setHorizontalHeaderLabels(["序号", "类型", "跳转标记", "摘要", "备注"])
+        self.node_table.verticalHeader().setVisible(False)
+        self.node_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.node_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.node_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.node_table.horizontalHeader().setStretchLastSection(True)
+        splitter.addWidget(self.node_table)
+        splitter.setStretchFactor(1, 1)
+
+        self.tip_label = QLabel("支持单节点或连续多节点复制。")
+        layout.addWidget(self.tip_label)
+
+        buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        self.button_box = QDialogButtonBox(buttons)
+        ok_button = self.button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_button is not None:
+            ok_button.setText("复制到剪贴板")
+        self.button_box.accepted.connect(self._accept_selection)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+    def selected_payload(self) -> NodeClipboardPayload | None:
+        return self._selected_payload
+
+    @property
+    def current_flow(self) -> FlowDocument | None:
+        if not self.document or not self.current_flow_name:
+            return None
+        return self.document.get_flow(self.current_flow_name)
+
+    def _choose_directory(self) -> None:
+        directory = QFileDialog.getExistingDirectory(self, "选择来源配置目录")
+        if not directory:
+            return
+        root_path = Path(directory)
+        try:
+            self.document = self.codec.load_document(root_path)
+        except OSError as exc:
+            QMessageBox.critical(self, "加载失败", f"无法读取配置目录：{exc}")
+            return
+
+        self.current_flow_name = self.document.flows[0].filename if self.document.flows else None
+        self.path_label.setText(str(root_path))
+        self._refresh_flow_tree()
+        self._refresh_node_table()
+
+    def _refresh_flow_tree(self) -> None:
+        self.flow_tree.blockSignals(True)
+        self.flow_tree.clear()
+        if not self.document:
+            self.flow_tree.blockSignals(False)
+            return
+
+        root_item = QTreeWidgetItem([self.document.root_path.name])
+        root_item.setData(0, Qt.UserRole, None)
+        self.flow_tree.addTopLevelItem(root_item)
+        for flow in self.document.flows:
+            child = QTreeWidgetItem([flow.filename])
+            child.setData(0, Qt.UserRole, flow.filename)
+            root_item.addChild(child)
+            if flow.filename == self.current_flow_name:
+                self.flow_tree.setCurrentItem(child)
+        root_item.setExpanded(True)
+        self.flow_tree.blockSignals(False)
+
+    def _refresh_node_table(self) -> None:
+        self.node_table.setRowCount(0)
+        flow = self.current_flow
+        if not flow:
+            return
+
+        flow.reindex()
+        self.node_table.setRowCount(len(flow.nodes))
+        for row, node in enumerate(flow.nodes):
+            self.node_table.setItem(row, 0, QTableWidgetItem(str(node.index)))
+            self.node_table.setItem(row, 1, QTableWidgetItem(node.operation))
+            self.node_table.setItem(row, 2, QTableWidgetItem(node.jump_mark))
+            summary_item = QTableWidgetItem(summarize_node(node))
+            summary_item.setData(Qt.UserRole, node.node_id)
+            self.node_table.setItem(row, 3, summary_item)
+            self.node_table.setItem(row, 4, QTableWidgetItem(node.note))
+
+        self.node_table.resizeColumnsToContents()
+
+    def _on_flow_selection_changed(self) -> None:
+        selected = self.flow_tree.selectedItems()
+        if not selected:
+            return
+        filename = selected[0].data(0, Qt.UserRole)
+        if not filename:
+            return
+        self.current_flow_name = filename
+        self._refresh_node_table()
+
+    def _accept_selection(self) -> None:
+        flow = self.current_flow
+        if not self.document or not flow:
+            QMessageBox.information(self, "复制节点", "请先选择来源配置目录和流程。")
+            return
+
+        selected_rows = self._selected_row_indexes()
+        if not selected_rows:
+            QMessageBox.information(self, "复制节点", "请先选择要复制的节点。")
+            return
+        if not self._is_contiguous_selection(selected_rows):
+            QMessageBox.information(self, "复制节点", "当前仅支持连续多选复制。")
+            return
+
+        nodes = [flow.nodes[row] for row in selected_rows]
+        self._selected_payload = build_clipboard_payload(self.document.root_path, flow.filename, nodes)
+        self.accept()
+
+    def _selected_row_indexes(self) -> list[int]:
+        rows = {index.row() for index in self.node_table.selectionModel().selectedRows()} if self.node_table.selectionModel() else set()
+        return sorted(row for row in rows if row >= 0)
+
+    @staticmethod
+    def _is_contiguous_selection(rows: list[int]) -> bool:
+        return not rows or rows == list(range(rows[0], rows[-1] + 1))
 
 
 class UnusedImagesDialog(QDialog):
