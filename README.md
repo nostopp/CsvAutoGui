@@ -20,6 +20,10 @@
    ```powershell
    uv run mainWindow.py
    ```
+   CSV 可视化编辑器
+   ```powershell
+   uv run python -m csv_editor
+   ```
 
 ### 运行参数
 
