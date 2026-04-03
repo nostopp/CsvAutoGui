@@ -6,22 +6,22 @@ from pathlib import Path
 
 from csv_editor.domain.enums import BranchMode, BranchTrigger, OperationType
 from csv_editor.domain.models import BranchConfig, EditorDocument, FlowDocument, OperationNode
-
-CSV_COLUMNS = [
-    "序号",
-    "操作",
-    "操作参数",
-    "完成后等待时间",
-    "图片/ocr名称",
-    "图片/ocr坐标范围",
-    "图片/ocr置信度",
-    "未找到图片/ocr重试时间",
-    "图片/ocr定位移动随机",
-    "移动操作用时",
-    "跳转标记",
-    "图片不使用灰度匹配",
-    "备注",
-]
+from csv_schema import (
+    COL_CONFIDENCE,
+    COL_DISABLE_GRAYSCALE,
+    COL_INDEX,
+    COL_JUMP_MARK,
+    COL_MOVE_TIME,
+    COL_NOTE,
+    COL_OPERATION,
+    COL_PARAM,
+    COL_RANGE_RANDOM,
+    COL_REGION,
+    COL_RETRY,
+    COL_SEARCH_TARGET,
+    COL_WAIT,
+    CSV_COLUMNS,
+)
 
 
 class CsvEditorCodec:
@@ -66,43 +66,43 @@ class CsvEditorCodec:
         return buffer.getvalue()
 
     def _decode_row(self, row: dict[str, str]) -> OperationNode:
-        branch = self._decode_branch((row.get("操作参数") or "").strip(), (row.get("操作") or "").strip())
-        wait_value, wait_random = self._split_pair((row.get("完成后等待时间") or "").strip())
-        retry_value, retry_random = self._split_pair((row.get("未找到图片/ocr重试时间") or "").strip())
+        branch = self._decode_branch((row.get(COL_PARAM) or "").strip(), (row.get(COL_OPERATION) or "").strip())
+        wait_value, wait_random = self._split_pair((row.get(COL_WAIT) or "").strip())
+        retry_value, retry_random = self._split_pair((row.get(COL_RETRY) or "").strip())
         return OperationNode(
-            index=self._safe_int((row.get("序号") or "").strip()),
-            operation=(row.get("操作") or "").strip(),
-            param_text=self._decode_param_text((row.get("操作参数") or "").strip(), (row.get("操作") or "").strip(), branch),
+            index=self._safe_int((row.get(COL_INDEX) or "").strip()),
+            operation=(row.get(COL_OPERATION) or "").strip(),
+            param_text=self._decode_param_text((row.get(COL_PARAM) or "").strip(), (row.get(COL_OPERATION) or "").strip(), branch),
             wait_value=wait_value,
             wait_random=wait_random,
-            search_target=(row.get("图片/ocr名称") or "").strip(),
-            region_text=(row.get("图片/ocr坐标范围") or "").strip(),
-            confidence_text=(row.get("图片/ocr置信度") or "").strip(),
+            search_target=(row.get(COL_SEARCH_TARGET) or "").strip(),
+            region_text=(row.get(COL_REGION) or "").strip(),
+            confidence_text=(row.get(COL_CONFIDENCE) or "").strip(),
             retry_value=retry_value,
             retry_random=retry_random,
-            pic_range_random=(row.get("图片/ocr定位移动随机") or "").strip() == "1",
-            move_time=(row.get("移动操作用时") or "").strip(),
-            jump_mark=(row.get("跳转标记") or "").strip(),
-            disable_grayscale=(row.get("图片不使用灰度匹配") or "").strip() == "1",
-            note=(row.get("备注") or "").strip(),
+            pic_range_random=(row.get(COL_RANGE_RANDOM) or "").strip() == "1",
+            move_time=(row.get(COL_MOVE_TIME) or "").strip(),
+            jump_mark=(row.get(COL_JUMP_MARK) or "").strip(),
+            disable_grayscale=(row.get(COL_DISABLE_GRAYSCALE) or "").strip() == "1",
+            note=(row.get(COL_NOTE) or "").strip(),
             branch=branch,
         )
 
     def _encode_row(self, node: OperationNode) -> dict[str, str]:
         return {
-            "序号": str(node.index),
-            "操作": node.operation,
-            "操作参数": self._encode_param_text(node),
-            "完成后等待时间": self._join_pair(node.wait_value, node.wait_random),
-            "图片/ocr名称": node.search_target,
-            "图片/ocr坐标范围": node.region_text,
-            "图片/ocr置信度": node.confidence_text,
-            "未找到图片/ocr重试时间": self._join_pair(node.retry_value, node.retry_random),
-            "图片/ocr定位移动随机": "1" if node.pic_range_random else "",
-            "移动操作用时": node.move_time,
-            "跳转标记": node.jump_mark,
-            "图片不使用灰度匹配": "1" if node.disable_grayscale else "",
-            "备注": node.note,
+            COL_INDEX: str(node.index),
+            COL_OPERATION: node.operation,
+            COL_PARAM: self._encode_param_text(node),
+            COL_WAIT: self._join_pair(node.wait_value, node.wait_random),
+            COL_SEARCH_TARGET: node.search_target,
+            COL_REGION: node.region_text,
+            COL_CONFIDENCE: node.confidence_text,
+            COL_RETRY: self._join_pair(node.retry_value, node.retry_random),
+            COL_RANGE_RANDOM: "1" if node.pic_range_random else "",
+            COL_MOVE_TIME: node.move_time,
+            COL_JUMP_MARK: node.jump_mark,
+            COL_DISABLE_GRAYSCALE: "1" if node.disable_grayscale else "",
+            COL_NOTE: node.note,
         }
 
     def _decode_branch(self, raw_param: str, operation: str) -> BranchConfig:

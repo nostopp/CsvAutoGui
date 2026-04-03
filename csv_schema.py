@@ -1,0 +1,29 @@
+COL_INDEX = "序号"
+COL_OPERATION = "操作"
+COL_PARAM = "操作参数"
+COL_WAIT = "完成后等待时间"
+COL_SEARCH_TARGET = "图片/ocr名称"
+COL_REGION = "图片/ocr坐标范围"
+COL_CONFIDENCE = "图片/ocr置信度"
+COL_RETRY = "未找到图片/ocr重试时间"
+COL_RANGE_RANDOM = "图片/ocr定位移动随机"
+COL_MOVE_TIME = "移动操作用时"
+COL_JUMP_MARK = "跳转标记"
+COL_DISABLE_GRAYSCALE = "图片不使用灰度匹配"
+COL_NOTE = "备注"
+
+CSV_COLUMNS = [
+    COL_INDEX,
+    COL_OPERATION,
+    COL_PARAM,
+    COL_WAIT,
+    COL_SEARCH_TARGET,
+    COL_REGION,
+    COL_CONFIDENCE,
+    COL_RETRY,
+    COL_RANGE_RANDOM,
+    COL_MOVE_TIME,
+    COL_JUMP_MARK,
+    COL_DISABLE_GRAYSCALE,
+    COL_NOTE,
+]
