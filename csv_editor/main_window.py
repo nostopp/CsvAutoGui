@@ -306,7 +306,7 @@ class EditorMainWindow(QMainWindow):
             return
 
         flow.reindex()
-        jump_targets = sorted({str(node.index) for node in flow.nodes} | set(flow.jump_marks().keys()), key=str.lower)
+        jump_targets = list(flow.jump_marks().keys())
         subflow_targets = list(self.document.iter_flow_filenames()) if self.document else []
         self.inspector.set_reference_data(jump_targets, subflow_targets)
         issue_node_ids = {issue.node_id for issue in self.issues if issue.flow_name == flow.filename and issue.node_id}
@@ -568,11 +568,26 @@ class EditorMainWindow(QMainWindow):
 
     def delete_node(self) -> None:
         flow = self.current_flow
-        node = self.current_node
-        if not flow or not node:
+        if not flow:
             return
-        index = flow.nodes.index(node)
-        self.undo_stack.push(DeleteNodeCommand(self, flow.filename, node, index))
+        selected_rows = self._selected_row_indexes(self.node_table)
+        if not selected_rows:
+            node = self.current_node
+            if not node:
+                return
+            selected_rows = [flow.nodes.index(node)]
+
+        self.undo_stack.beginMacro("删除节点")
+        try:
+            for row in reversed(selected_rows):
+                if row < 0 or row >= len(flow.nodes):
+                    continue
+                node = flow.nodes[row]
+                self.undo_stack.push(DeleteNodeCommand(self, flow.filename, node, row))
+        finally:
+            self.undo_stack.endMacro()
+
+        self.statusBar().showMessage(f"已删除 {len(selected_rows)} 个节点", 3000)
 
     def move_node_up(self) -> None:
         self._move_node(-1)
@@ -616,7 +631,7 @@ class EditorMainWindow(QMainWindow):
             (self.add_node_action, "在当前节点后新增节点"),
             (self.copy_nodes_action, "复制选中的一个或多个节点"),
             (self.paste_nodes_action, "在当前节点后粘贴剪贴板中的节点"),
-            (self.delete_node_action, "删除当前节点"),
+            (self.delete_node_action, "删除当前或选中的一个或多个节点"),
             (self.move_up_action, "将当前节点上移"),
             (self.move_down_action, "将当前节点下移"),
         ]
@@ -1177,7 +1192,7 @@ class NodeInspector(QWidget):
 
     def _line_edit(self, form: QFormLayout, label: str, value: str) -> QLineEdit:
         edit = QLineEdit(value)
-        edit.textChanged.connect(self._emit_change)
+        edit.editingFinished.connect(self._emit_change)
         form.addRow(label, edit)
         return edit
 
@@ -1186,13 +1201,16 @@ class NodeInspector(QWidget):
         combo.setEditable(True)
         combo.addItems(options)
         combo.setCurrentText(value)
-        combo.currentTextChanged.connect(self._emit_change)
+        combo.currentIndexChanged.connect(self._emit_change)
+        line_edit = combo.lineEdit()
+        if line_edit is not None:
+            line_edit.editingFinished.connect(self._emit_change)
         form.addRow(label, combo)
         return combo
 
     def _line_with_button(self, form: QFormLayout, label: str, value: str, button_text: str, action: str) -> QLineEdit:
         edit = QLineEdit(value)
-        edit.textChanged.connect(self._emit_change)
+        edit.editingFinished.connect(self._emit_change)
         button = QPushButton(button_text)
         button.clicked.connect(lambda: self._request_action(action))
         row = QWidget()
