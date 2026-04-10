@@ -50,6 +50,7 @@ from csv_editor.io.node_clipboard import (
     deserialize_clipboard_payload,
     serialize_clipboard_payload,
 )
+from csv_editor.recording_dialog import RecordingDialog
 from csv_editor.services.capture import capture_point, capture_region
 from csv_editor.services.asset_usage import find_unused_images
 from csv_editor.services.summary import summarize_node
@@ -70,6 +71,7 @@ class EditorMainWindow(QMainWindow):
         self.current_flow_name: str | None = None
         self.current_node_id: str | None = None
         self.issues: list[ValidationIssue] = []
+        self._recording_dialog: RecordingDialog | None = None
         self._title_base = "CsvAutoGui Editor"
         self.setWindowTitle(f"{self._title_base}[*]")
         self.resize(1400, 900)
@@ -84,6 +86,7 @@ class EditorMainWindow(QMainWindow):
         self.save_action = QAction("保存 CSV", self)
         self.reload_action = QAction("重新加载", self)
         self.import_nodes_action = QAction("从其他自动化复制节点…", self)
+        self.record_nodes_action = QAction("录制操作…", self)
         self.scan_unused_images_action = QAction("扫描未使用图片", self)
         self.undo_action = self.undo_stack.createUndoAction(self, "撤销")
         self.undo_action.setShortcut(QKeySequence("Ctrl+Z"))
@@ -120,6 +123,7 @@ class EditorMainWindow(QMainWindow):
         edit_menu.addAction(self.move_down_action)
 
         tools_menu = self.menuBar().addMenu("工具")
+        tools_menu.addAction(self.record_nodes_action)
         tools_menu.addAction(self.scan_unused_images_action)
 
         toolbar = self.addToolBar("编辑")
@@ -128,6 +132,7 @@ class EditorMainWindow(QMainWindow):
         toolbar.addAction(self.undo_action)
         toolbar.addAction(self.redo_action)
         toolbar.addAction(self.import_nodes_action)
+        toolbar.addAction(self.record_nodes_action)
         toolbar.addAction(self.scan_unused_images_action)
         toolbar.addSeparator()
         toolbar.addAction(self.add_node_action)
@@ -199,6 +204,7 @@ class EditorMainWindow(QMainWindow):
         self.save_action.triggered.connect(self.save_document)
         self.reload_action.triggered.connect(self.reload_document)
         self.import_nodes_action.triggered.connect(self.import_nodes_from_external_project)
+        self.record_nodes_action.triggered.connect(self.open_recording_dialog)
         self.scan_unused_images_action.triggered.connect(self.show_unused_images_dialog)
         self.add_node_action.triggered.connect(self.add_node)
         self.copy_nodes_action.triggered.connect(self.copy_selected_nodes)
@@ -472,7 +478,7 @@ class EditorMainWindow(QMainWindow):
             return
 
     def _capture_region_with_hidden_window(self):
-        self.hide()
+        self.showMinimized()
         QGuiApplication.processEvents()
         time.sleep(CAPTURE_HIDE_DELAY_SECONDS)
         QGuiApplication.processEvents()
@@ -485,7 +491,7 @@ class EditorMainWindow(QMainWindow):
             QGuiApplication.processEvents()
 
     def _capture_point_with_hidden_window(self):
-        self.hide()
+        self.showMinimized()
         QGuiApplication.processEvents()
         time.sleep(CAPTURE_HIDE_DELAY_SECONDS)
         QGuiApplication.processEvents()
@@ -566,6 +572,22 @@ class EditorMainWindow(QMainWindow):
             5000,
         )
 
+    def open_recording_dialog(self) -> None:
+        if not self.document:
+            QMessageBox.information(self, "未打开配置", "请先打开一个目标配置目录。")
+            return
+
+        source_flow = self.current_flow_name or "main.csv"
+        self._recording_dialog = RecordingDialog(
+            source_root=self.document.root_path,
+            source_flow=source_flow,
+            clipboard_writer=self._write_nodes_to_clipboard,
+            host_window=self,
+        )
+        self._recording_dialog.show()
+        self._recording_dialog.raise_()
+        self._recording_dialog.activateWindow()
+
     def delete_node(self) -> None:
         flow = self.current_flow
         if not flow:
@@ -625,6 +647,7 @@ class EditorMainWindow(QMainWindow):
             (self.save_action, "保存当前 CSV"),
             (self.reload_action, "重新加载当前配置目录"),
             (self.import_nodes_action, "从其他自动化选择节点并复制到剪贴板"),
+            (self.record_nodes_action, "录制键鼠操作并复制成节点"),
             (self.scan_unused_images_action, "扫描当前配置目录下未使用的图片"),
             (self.undo_action, "撤销上一步操作"),
             (self.redo_action, "重做上一步撤销的操作"),
@@ -691,6 +714,7 @@ class EditorMainWindow(QMainWindow):
             self.save_action,
             self.reload_action,
             self.import_nodes_action,
+            self.record_nodes_action,
             self.add_node_action,
             self.copy_nodes_action,
             self.paste_nodes_action,
