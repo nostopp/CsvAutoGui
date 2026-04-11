@@ -4,6 +4,7 @@ import pydirectinput
 import numpy as np
 import cv2
 from .baseInput import BaseInput
+from .imageMatcher import locateCenterColorSensitiveOnImage
 
 MOVE_FPS = 60
 MOVE_INTERVAL = 1/MOVE_FPS
@@ -11,8 +12,20 @@ PRIMARY = "left"
 class FrontGroundInput(BaseInput):
     def __init__(self, printLog=False):
         self._printLog = printLog
+        self._last_locate_confidence = None
 
     def locateCenterOnScreen(self, image, **kwargs):
+        self._last_locate_confidence = None
+        if kwargs.get('grayscale', None) is False:
+            screenshotIm = self.screenShot()
+            center, confidenceScore = locateCenterColorSensitiveOnImage(
+                image,
+                screenshotIm,
+                kwargs.get('confidence', 0.999),
+                kwargs.get('region', None),
+            )
+            self._last_locate_confidence = confidenceScore
+            return center
         return pyautogui.locateCenterOnScreen(image, **kwargs)
 
     def screenShot(self):

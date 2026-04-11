@@ -140,16 +140,28 @@ class AutoOperator:
             else:
                 img = operation['search_pic_cache']
             center = self._input.locateCenterOnScreen(img, confidence=confidence, region=region, grayscale=grayscale)
+            matchConfidence = getattr(self._input, '_last_locate_confidence', None)
 
             if self._printLog:
-                log.debug(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}')
+                confidenceText = '' if matchConfidence is None else f', 置信度: {matchConfidence:.3f}'
+                log.debug(f'搜索图片 {operation["search_pic"]}, 用时: {time.time()-startTime:.2f},位置: {center}{confidenceText}')
         except pyautogui.ImageNotFoundException as e:
             if self._printLog:
-                match = CONFIDENCE_PATTERN.search(str(e.__context__))
-                if match:
-                    log.debug(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}, 置信度: {match.group(1)}')
-                else:
-                    log.debug(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}')
+                matchConfidence = getattr(e, 'confidence_score', None)
+                if matchConfidence is None:
+                    matchConfidence = getattr(self._input, '_last_locate_confidence', None)
+                if matchConfidence is None:
+                    errorTexts = [str(e)]
+                    if e.__context__:
+                        errorTexts.append(str(e.__context__))
+                    for errorText in errorTexts:
+                        match = CONFIDENCE_PATTERN.search(errorText)
+                        if match:
+                            matchConfidence = float(match.group(1))
+                            break
+
+                confidenceText = '' if matchConfidence is None else f', 置信度: {matchConfidence:.3f}'
+                log.debug(f'搜索图片 {operation["search_pic"]} 未找到, 用时: {time.time()-startTime:.2f}{confidenceText}')
 
             if operateParam:
                 return self._handle_branch_result(operateParam, matched=False)

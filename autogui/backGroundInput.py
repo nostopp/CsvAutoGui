@@ -12,6 +12,7 @@ import pyscreeze
 from pathlib import Path
 from . import log
 from .baseInput import BaseInput
+from .imageMatcher import locateCenterColorSensitiveOnImage
 
 # https://docs.microsoft.com/zh/windows/win32/inputdev/virtual-key-codes
 # key的wparam就是vkcode
@@ -113,6 +114,7 @@ class BackGroundInput(BaseInput):
         self._window_title = window_title
         self._multi_window = multi_window
         self._pring_log = print_log
+        self._last_locate_confidence = None
         hwnd = win32gui.FindWindow(None, window_title)  # 获取窗口句柄
         if hwnd:
             self._hwnd = hwnd
@@ -284,6 +286,7 @@ class BackGroundInput(BaseInput):
 
     def locateCenterOnScreen(self, img, **kwargs):
         # self.activate()
+        self._last_locate_confidence = None
         screenshotIm = self.screenShot()
         if 'region' in kwargs:
             region = kwargs['region']
@@ -293,6 +296,15 @@ class BackGroundInput(BaseInput):
             if SAVE_SCREENSHOT:
                 crop_image = screenshotIm[region[1] : region[1] + region[3], region[0] : region[0] + region[2]]
                 self.SaveScreenshot('screenshot_crop', crop_image)
+        if kwargs.get('grayscale', None) is False:
+            center, confidenceScore = locateCenterColorSensitiveOnImage(
+                img,
+                screenshotIm,
+                kwargs.get('confidence', 0.999),
+                kwargs.get('region', None),
+            )
+            self._last_locate_confidence = confidenceScore
+            return center
         retVal = pyautogui.locate(img, screenshotIm, **kwargs)
 
         if retVal:
