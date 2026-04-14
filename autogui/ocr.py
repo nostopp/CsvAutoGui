@@ -3,6 +3,7 @@ import pyautogui
 import cv2
 import numpy as np
 import time
+import re
 from pathlib import Path
 from .baseInput import BaseInput
 from . import log
@@ -150,12 +151,15 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
     
     return None, None, None, None
 
-def isNumber(s: str) -> bool:
-    try:
-        float(s)
-        return True
-    except ValueError:
-        return False
+_NUMBER_PATTERN = re.compile(r'[-+]?(?:(?:\d{1,3}(?:,\d{3})+)|\d+)(?:\.\d+)?|[-+]?\.\d+')
+
+def extractMaxNumber(text: str):
+    matches = _NUMBER_PATTERN.findall(text)
+    if not matches:
+        return None
+
+    numbers = [float(match.replace(',', '')) for match in matches]
+    return max(numbers)
 
 def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
     if ocrResult is None or not ocrResult:
@@ -176,15 +180,18 @@ def CompareNumInResult(ocrResult, findStr: str, confidence: float, compare):
         case '!=':
             compareFunc = lambda a, b: a != b
 
+    targetNum = float(findStr)
+
     result = ocrResult[0]  # 获取第一页结果
     texts = result['rec_texts']  # 识别的文本列表
     scores = result['rec_scores']  # 置信度列表
     boxes = result['rec_polys']  # 文本框坐标列表
     
     for i, (text, score) in enumerate(zip(texts, scores)):
+        textNum = extractMaxNumber(text)
         if shouldLog():
-            log.debug(f'OCR识别到文本: "{text}" 置信度: {score}')
-        if isNumber(text) and score >= confidence and compareFunc(float(text), float(findStr)):
+            log.debug(f'OCR识别到文本: "{text}" 置信度: {score}, 提取最大数值: {textNum}')
+        if textNum is not None and score >= confidence and compareFunc(textNum, targetNum):
             wordBox = np.array(boxes[i])
             midPoint = wordBox[0] + (wordBox[1]-wordBox[0]) * 0.5
             midPoint += (wordBox[3] - wordBox[0]) / 2
