@@ -115,6 +115,8 @@ class BackGroundInput(BaseInput):
         self._multi_window = multi_window
         self._pring_log = print_log
         self._last_locate_confidence = None
+        self._pressed_mouse_buttons = set()
+        self._mouse_activation_held = False
         hwnd = win32gui.FindWindow(None, window_title)  # 获取窗口句柄
         if hwnd:
             self._hwnd = hwnd
@@ -354,6 +356,18 @@ class BackGroundInput(BaseInput):
     def deactivate(self):
         win32gui.PostMessage(self._hwnd, win32con.WM_ACTIVATE, win32con.WA_INACTIVE, 0)
 
+    def _beginMouseActivation(self):
+        if self._mouse_activation_held:
+            return
+        self.activate()
+        self._mouse_activation_held = True
+
+    def _endMouseActivation(self):
+        if not self._mouse_activation_held:
+            return
+        self.deactivate()
+        self._mouse_activation_held = False
+
     def moveTo(self, x, y, duration=0.0):
         # self.activate()
         self._mouse_x = int(x)
@@ -374,26 +388,41 @@ class BackGroundInput(BaseInput):
         self.mouseUp(button)
 
     @_multiWindowCheck
-    def mouseDown(self, button=PRIMARY):
-        # self.activate()
+    def _postMouseDown(self, button=PRIMARY):
         wparam = MwParam[button]
         if button in ["x1", "x2"]:
             wparam = wparam | MHwParam[button] << 16
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_down"]
         win32gui.PostMessage(self._hwnd, message, wparam, lparam)
-        # self.deactivate()
 
     @_multiWindowCheck
-    def mouseUp(self, button=PRIMARY):
-        # self.activate()
+    def _postMouseUp(self, button=PRIMARY):
         wparam = 0
         if button in ["x1", "x2"]:
             wparam = wparam | MHwParam[button] << 16
         lparam = self._mouse_y << 16 | self._mouse_x
         message = WmCode[f"{button}_up"]
         win32gui.PostMessage(self._hwnd, message, wparam, lparam)
-        # self.deactivate()
+
+    def mouseDown(self, button=PRIMARY):
+        try:
+            if button not in self._pressed_mouse_buttons:
+                self._beginMouseActivation()
+                self._pressed_mouse_buttons.add(button)
+            self._postMouseDown(button)
+        except Exception:
+            self._pressed_mouse_buttons.discard(button)
+            if not self._pressed_mouse_buttons:
+                self._endMouseActivation()
+
+    def mouseUp(self, button=PRIMARY):
+        try:
+            self._postMouseUp(button)
+        finally:
+            self._pressed_mouse_buttons.discard(button)
+            if not self._pressed_mouse_buttons:
+                self._endMouseActivation()
 
     def virtualKeyCode(self, key: str):
         # 获取打印字符
