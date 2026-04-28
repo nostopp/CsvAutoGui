@@ -39,6 +39,7 @@
 | --offset | 运行时对涉及到的绝对坐标进行偏移 | 0;0 |
 | -t / --title | 目标窗口名称,指定后程序运行在后台窗口模式 | None |
 | -m / --multi_window | 后台窗口多窗口控件模式 | False |
+| --click_move_cursor | 后台 `click` 时临时将真实鼠标移动到目标点，点击后快速恢复原位置 | False |
 | --process | 获取所有可见窗口名称 | False |
 
 - **终止程序**：按 `Ctrl+Shift+X`

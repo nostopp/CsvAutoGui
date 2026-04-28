@@ -69,6 +69,9 @@ class MainWindow:
         self.var_multi = tk.BooleanVar(value=defaults.multi_window)
         ttk.Checkbutton(frm_top, text='multi_window', variable=self.var_multi).grid(row=3, column=2)
 
+        self.var_click_move_cursor = tk.BooleanVar(value=defaults.click_move_cursor)
+        ttk.Checkbutton(frm_top, text='click_move_cursor', variable=self.var_click_move_cursor).grid(row=3, column=3)
+
         self.var_process = tk.BooleanVar(value=defaults.process)
         ttk.Checkbutton(frm_top, text='process', variable=self.var_process).grid(row=4, column=0)
 
@@ -187,6 +190,7 @@ class MainWindow:
             offset=self.e_offset.get(),
             title=self.e_title.get() or None,
             multi_window=self.var_multi.get(),
+            click_move_cursor=self.var_click_move_cursor.get(),
             process=self.var_process.get(),
             record=self.var_record.get(),
             _from_window=True,
@@ -372,6 +376,7 @@ class MainWindow:
             'offset': args.offset,
             'title': args.title,
             'multi_window': args.multi_window,
+            'click_move_cursor': args.click_move_cursor,
             'process': args.process,
             'record': args.record,
         }
@@ -431,6 +436,9 @@ class MainWindow:
 
             if 'multi_window' in data:
                 self.var_multi.set(bool(data.get('multi_window')))
+
+            if 'click_move_cursor' in data:
+                self.var_click_move_cursor.set(bool(data.get('click_move_cursor')))
 
             if 'process' in data:
                 self.var_process.set(bool(data.get('process')))

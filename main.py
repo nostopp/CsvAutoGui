@@ -22,6 +22,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--offset", help="搜索时需要的偏移值", default="0;0", type=str)
     parser.add_argument("-t", "--title", help="目标窗口名称,指定后程序运行在后台窗口模式", default=None, type=str)
     parser.add_argument("-m", "--multi_window", action="store_true", help="后台窗口多窗口控件模式", default=False)
+    parser.add_argument("--click_move_cursor", action="store_true", help="后台 click 时临时移动真实鼠标到目标点后快速恢复", default=False)
     parser.add_argument("--process", action="store_true", help="获取所有可见窗口名称", default=False)
     parser.add_argument("--record", action="store_true", help="录制鼠标和键盘事件并导出 CSV", default=False)
     # internal flag to indicate called from GUI manager
@@ -107,9 +108,10 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
     GET_PROCESS = args.process
     TITLE = args.title
     MULTI_WINDOW = args.multi_window
+    CLICK_MOVE_CURSOR = args.click_move_cursor
     RECORD = args.record
 
-    log.debug(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 截图模式: {SCREENSHOT_MODE}, 获取进程模式: {GET_PROCESS}, 录制操作模式: {RECORD}, 抓取的窗口标题: {TITLE}, 多窗口模式: {MULTI_WINDOW}")
+    log.debug(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 截图模式: {SCREENSHOT_MODE}, 获取进程模式: {GET_PROCESS}, 录制操作模式: {RECORD}, 抓取的窗口标题: {TITLE}, 多窗口模式: {MULTI_WINDOW}, 点击瞬移鼠标模式: {CLICK_MOVE_CURSOR}")
 
     # 初始化 scale helper 等
     try:
@@ -155,7 +157,7 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
             if not TITLE:
                 input_obj = autogui.FrontGroundInput(PRINT_LOG)
             else:
-                input_obj = autogui.BackGroundInput(TITLE, MULTI_WINDOW, PRINT_LOG)
+                input_obj = autogui.BackGroundInput(TITLE, MULTI_WINDOW, PRINT_LOG, CLICK_MOVE_CURSOR)
 
             subOperatorList: list[autogui.AutoOperator] = []
             mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH, scale_helper), CONFIG_PATH, subOperatorList, input_obj, scale_helper, LOOP, PRINT_LOG)

@@ -105,18 +105,19 @@ MHwParam = {
     "x2": 0x0002,  # 侧键前进按钮
 }
 PRIMARY = "left"
-PRESS_TIME = 0.02
+PRESS_TIME = 0.05
 SAVE_SCREENSHOT_PATH = None
 SAVE_SCREENSHOT = False
 
 class BackGroundInput(BaseInput):
-    def __init__(self, window_title: str, multi_window = False, print_log=False):
+    def __init__(self, window_title: str, multi_window = False, print_log=False, click_move_cursor=False):
         self._window_title = window_title
         self._multi_window = multi_window
         self._pring_log = print_log
         self._last_locate_confidence = None
         self._pressed_mouse_buttons = set()
         self._mouse_activation_held = False
+        self._click_move_cursor = click_move_cursor
         hwnd = win32gui.FindWindow(None, window_title)  # 获取窗口句柄
         if hwnd:
             self._hwnd = hwnd
@@ -383,9 +384,19 @@ class BackGroundInput(BaseInput):
 
     def click(self, button=PRIMARY):
         # win32api.SetCursorPos((self._mouse_x, self._mouse_y))
-        self.mouseDown(button)
-        time.sleep(PRESS_TIME)
-        self.mouseUp(button)
+        origin_cursor_pos = None
+        try:
+            if self._click_move_cursor:
+                origin_cursor_pos = win32api.GetCursorPos()
+                target_cursor_pos = win32gui.ClientToScreen(self._hwnd, (self._mouse_x, self._mouse_y))
+                win32api.SetCursorPos(target_cursor_pos)
+            self.mouseDown(button)
+            time.sleep(PRESS_TIME)
+            self.mouseUp(button)
+        finally:
+            if origin_cursor_pos is not None:
+                time.sleep(PRESS_TIME)
+                win32api.SetCursorPos(origin_cursor_pos)
 
     @_multiWindowCheck
     def _postMouseDown(self, button=PRIMARY):
