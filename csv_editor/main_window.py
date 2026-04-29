@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, Qt, Signal
-from PySide6.QtGui import QAction, QGuiApplication, QKeySequence, QPixmap, QUndoStack
+from PySide6.QtGui import QAction, QBrush, QColor, QFont, QGuiApplication, QKeySequence, QPixmap, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -26,7 +27,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QDialog,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QTreeWidget,
@@ -58,6 +61,8 @@ from csv_editor.services.validation import validate_document
 from csv_editor.undo_commands import DeleteNodeCommand, InsertNodeCommand, MoveNodeCommand, UpdateNodeCommand
 
 CAPTURE_HIDE_DELAY_SECONDS = 0.2
+NODE_ID_ROLE = Qt.UserRole
+TARGET_ROLE = Qt.UserRole + 1
 
 
 class EditorMainWindow(QMainWindow):
@@ -72,6 +77,8 @@ class EditorMainWindow(QMainWindow):
         self.current_node_id: str | None = None
         self.issues: list[ValidationIssue] = []
         self._recording_dialog: RecordingDialog | None = None
+        self._syncing_selection = False
+        self._csv_preview_text = ""
         self._title_base = "CsvAutoGui Editor"
         self.setWindowTitle(f"{self._title_base}[*]")
         self.resize(1400, 900)
@@ -88,6 +95,7 @@ class EditorMainWindow(QMainWindow):
         self.import_nodes_action = QAction("从其他自动化复制节点…", self)
         self.record_nodes_action = QAction("录制操作…", self)
         self.scan_unused_images_action = QAction("扫描未使用图片", self)
+        self.show_csv_preview_action = QAction("查看 CSV 原始数据…", self)
         self.undo_action = self.undo_stack.createUndoAction(self, "撤销")
         self.undo_action.setShortcut(QKeySequence("Ctrl+Z"))
         self.redo_action = self.undo_stack.createRedoAction(self, "重做")
@@ -125,6 +133,7 @@ class EditorMainWindow(QMainWindow):
         tools_menu = self.menuBar().addMenu("工具")
         tools_menu.addAction(self.record_nodes_action)
         tools_menu.addAction(self.scan_unused_images_action)
+        tools_menu.addAction(self.show_csv_preview_action)
 
         toolbar = self.addToolBar("编辑")
         toolbar.addAction(self.open_action)
@@ -134,6 +143,7 @@ class EditorMainWindow(QMainWindow):
         toolbar.addAction(self.import_nodes_action)
         toolbar.addAction(self.record_nodes_action)
         toolbar.addAction(self.scan_unused_images_action)
+        toolbar.addAction(self.show_csv_preview_action)
         toolbar.addSeparator()
         toolbar.addAction(self.add_node_action)
         toolbar.addAction(self.copy_nodes_action)
@@ -149,52 +159,49 @@ class EditorMainWindow(QMainWindow):
         body_splitter = QSplitter(Qt.Horizontal)
         root_layout.addWidget(body_splitter, 1)
 
+        left_splitter = QSplitter(Qt.Vertical)
+        left_splitter.setMinimumWidth(220)
+        body_splitter.addWidget(left_splitter)
+
         self.flow_tree = QTreeWidget()
         self.flow_tree.setHeaderLabels(["流程文件"])
-        self.flow_tree.setMinimumWidth(220)
-        body_splitter.addWidget(self.flow_tree)
+        left_splitter.addWidget(self.flow_tree)
 
-        center_splitter = QSplitter(Qt.Vertical)
-        body_splitter.addWidget(center_splitter)
-        body_splitter.setStretchFactor(1, 1)
+        validation_panel = QWidget()
+        validation_layout = QVBoxLayout(validation_panel)
+        validation_layout.setContentsMargins(0, 4, 0, 0)
+        validation_layout.addWidget(QLabel("校验问题"))
+        self.validation_list = QListWidget()
+        validation_layout.addWidget(self.validation_list, 1)
+        left_splitter.addWidget(validation_panel)
+        left_splitter.setStretchFactor(0, 4)
+        left_splitter.setStretchFactor(1, 1)
+        left_splitter.setSizes([600, 170])
 
         content_splitter = QSplitter(Qt.Horizontal)
-        center_splitter.addWidget(content_splitter)
-        center_splitter.setStretchFactor(0, 3)
+        body_splitter.addWidget(content_splitter)
+        body_splitter.setStretchFactor(0, 0)
+        body_splitter.setStretchFactor(1, 1)
+        body_splitter.setSizes([250, 1150])
 
-        self.node_table = NodeTableWidget(0, 5)
-        self.node_table.setHorizontalHeaderLabels(["序号", "类型", "跳转标记", "摘要", "备注"])
+        self.view_tabs = QTabWidget()
+        content_splitter.addWidget(self.view_tabs)
+        content_splitter.setStretchFactor(0, 2)
+
+        self.node_table = NodeTableWidget(0, 6)
+        self.node_table.setHorizontalHeaderLabels(["序号", "类型", "跳转标记", "目标", "摘要", "备注"])
         self.node_table.verticalHeader().setVisible(False)
         self.node_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.node_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.node_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.node_table.horizontalHeader().setStretchLastSection(True)
+        self._configure_node_table_columns()
         self.node_table.setMinimumWidth(520)
-        content_splitter.addWidget(self.node_table)
-        content_splitter.setStretchFactor(0, 2)
+        self.view_tabs.addTab(self.node_table, "列表")
 
         self.inspector = NodeInspector()
         content_splitter.addWidget(self.inspector)
-        content_splitter.setStretchFactor(1, 2)
-
-        bottom_splitter = QSplitter(Qt.Horizontal)
-        center_splitter.addWidget(bottom_splitter)
-        center_splitter.setStretchFactor(1, 1)
-
-        left_bottom = QWidget()
-        left_bottom_layout = QVBoxLayout(left_bottom)
-        left_bottom_layout.setContentsMargins(0, 0, 0, 0)
-
-        left_bottom_layout.addWidget(QLabel("校验问题"))
-        self.validation_list = QListWidget()
-        left_bottom_layout.addWidget(self.validation_list, 1)
-
-        bottom_splitter.addWidget(left_bottom)
-
-        self.csv_preview = QPlainTextEdit()
-        self.csv_preview.setReadOnly(True)
-        bottom_splitter.addWidget(self.csv_preview)
-        bottom_splitter.setStretchFactor(1, 1)
+        content_splitter.setStretchFactor(1, 0)
+        content_splitter.setSizes([980, 300])
 
         self.setCentralWidget(root)
         self.statusBar().showMessage("请选择配置目录")
@@ -206,6 +213,7 @@ class EditorMainWindow(QMainWindow):
         self.import_nodes_action.triggered.connect(self.import_nodes_from_external_project)
         self.record_nodes_action.triggered.connect(self.open_recording_dialog)
         self.scan_unused_images_action.triggered.connect(self.show_unused_images_dialog)
+        self.show_csv_preview_action.triggered.connect(self.show_csv_preview_dialog)
         self.add_node_action.triggered.connect(self.add_node)
         self.copy_nodes_action.triggered.connect(self.copy_selected_nodes)
         self.paste_nodes_action.triggered.connect(self.paste_nodes)
@@ -214,6 +222,7 @@ class EditorMainWindow(QMainWindow):
         self.move_down_action.triggered.connect(self.move_node_down)
         self.flow_tree.itemSelectionChanged.connect(self._on_flow_selection_changed)
         self.node_table.itemSelectionChanged.connect(self._on_node_selection_changed)
+        self.node_table.itemActivated.connect(self._on_node_table_item_activated)
         self.validation_list.itemSelectionChanged.connect(self._on_issue_selection_changed)
         self.node_table.customContextMenuRequested.connect(self._show_node_context_menu)
         self.inspector.node_changed.connect(self._on_node_changed)
@@ -301,6 +310,21 @@ class EditorMainWindow(QMainWindow):
             self.validation_list.addItem(item)
         self.validation_list.blockSignals(False)
 
+    def _configure_node_table_columns(self) -> None:
+        header = self.node_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.Interactive)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.Interactive)
+        self.node_table.setColumnWidth(2, 105)
+        self.node_table.setColumnWidth(3, 150)
+        self.node_table.setColumnWidth(5, 130)
+        self.node_table.setWordWrap(True)
+        self.node_table.setTextElideMode(Qt.ElideNone)
+
     def _refresh_node_table(self) -> None:
         self.node_table.blockSignals(True)
         self.node_table.setRowCount(0)
@@ -316,23 +340,36 @@ class EditorMainWindow(QMainWindow):
         subflow_targets = list(self.document.iter_flow_filenames()) if self.document else []
         self.inspector.set_reference_data(jump_targets, subflow_targets)
         issue_node_ids = {issue.node_id for issue in self.issues if issue.flow_name == flow.filename and issue.node_id}
+        self.node_table.clearSelection()
         self.node_table.setRowCount(len(flow.nodes))
         for row, node in enumerate(flow.nodes):
             index_item = QTableWidgetItem(str(node.index))
             type_item = QTableWidgetItem(node.operation)
             jump_mark_item = QTableWidgetItem(node.jump_mark)
+            target_item = QTableWidgetItem(self._format_target_references(node))
             summary_item = QTableWidgetItem(summarize_node(node))
             note_item = QTableWidgetItem(node.note)
-            summary_item.setData(Qt.UserRole, node.node_id)
-            if node.node_id in issue_node_ids:
-                summary_item.setForeground(Qt.red)
-            if node.jump_mark:
-                jump_mark_item.setForeground(Qt.blue)
+            for item in [index_item, type_item, jump_mark_item, target_item, summary_item, note_item]:
+                item.setData(NODE_ID_ROLE, node.node_id)
+                item.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
+            targets = self._resolvable_target_references(node)
+            if targets:
+                target_item.setData(TARGET_ROLE, targets)
+                if len(targets) == 1:
+                    target_tip = f"双击跳转到: {targets[0][1]}"
+                else:
+                    target_tip = "双击选择跳转目标:\n" + "\n".join(f"{label} -> {target}" for label, target in targets)
+                target_item.setToolTip(f"{target_item.text()}\n{target_tip}")
+            elif target_item.text():
+                target_item.setToolTip(target_item.text())
+            summary_item.setToolTip(summarize_node(node))
+            self._apply_node_table_style(node, issue_node_ids, [index_item, type_item, jump_mark_item, target_item, summary_item, note_item])
             self.node_table.setItem(row, 0, index_item)
             self.node_table.setItem(row, 1, type_item)
             self.node_table.setItem(row, 2, jump_mark_item)
-            self.node_table.setItem(row, 3, summary_item)
-            self.node_table.setItem(row, 4, note_item)
+            self.node_table.setItem(row, 3, target_item)
+            self.node_table.setItem(row, 4, summary_item)
+            self.node_table.setItem(row, 5, note_item)
             if node.node_id == self.current_node_id:
                 self.node_table.selectRow(row)
 
@@ -340,16 +377,126 @@ class EditorMainWindow(QMainWindow):
             self.current_node_id = flow.nodes[0].node_id
             self.node_table.selectRow(0)
 
-        self.node_table.resizeColumnsToContents()
+        self._configure_node_table_columns()
+        self.node_table.resizeRowsToContents()
         self.node_table.blockSignals(False)
         self.inspector.set_node(self.current_node)
 
     def _refresh_preview(self) -> None:
         flow = self.current_flow
         if not flow:
-            self.csv_preview.clear()
+            self._csv_preview_text = ""
             return
-        self.csv_preview.setPlainText(self.codec.flow_to_csv_text(flow))
+        self._csv_preview_text = self.codec.flow_to_csv_text(flow)
+
+    def show_csv_preview_dialog(self) -> None:
+        dialog = QDialog(self)
+        flow_name = self.current_flow_name or "未选择流程"
+        dialog.setWindowTitle(f"CSV 原始数据 - {flow_name}")
+        dialog.resize(980, 620)
+
+        layout = QVBoxLayout(dialog)
+        text_edit = QPlainTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setPlainText(self._csv_preview_text)
+        layout.addWidget(text_edit, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+
+    def _select_node_by_target(self, target: str) -> bool:
+        flow = self.current_flow
+        if not flow:
+            return False
+        node = resolve_target_node(flow, target)
+        if node is None:
+            self.statusBar().showMessage(f"未找到跳转目标: {target}", 3000)
+            return False
+        return self._select_node_by_id(node.node_id)
+
+    def _select_node_by_id(self, node_id: str) -> bool:
+        flow = self.current_flow
+        if not flow:
+            return False
+        for row, node in enumerate(flow.nodes):
+            if node.node_id != node_id:
+                continue
+            self._syncing_selection = True
+            try:
+                self.current_node_id = node_id
+                self.node_table.selectRow(row)
+                self.node_table.scrollToItem(self.node_table.item(row, 0), QAbstractItemView.PositionAtCenter)
+                self.inspector.set_node(node)
+            finally:
+                self._syncing_selection = False
+            return True
+        return False
+
+    def _format_target_references(self, node: OperationNode) -> str:
+        references = self._target_references(node)
+        if not references:
+            return ""
+        return "\n".join(f"{label} -> {target}" for label, target in references if target)
+
+    def _resolvable_target_references(self, node: OperationNode) -> list[tuple[str, str]]:
+        flow = self.current_flow
+        if not flow:
+            return []
+        targets: list[tuple[str, str]] = []
+        for label, target in self._target_references(node):
+            if resolve_target_node(flow, target):
+                targets.append((label, target))
+        return targets
+
+    def _target_references(self, node: OperationNode) -> list[tuple[str, str]]:
+        if node.operation == OperationType.JUMP.value and node.param_text.strip():
+            return [("jmp", node.param_text.strip())]
+        if node.operation in {OperationType.PIC.value, OperationType.OCR.value} and node.branch.is_enabled:
+            if node.branch.mode is BranchMode.JUMP_PAIR:
+                trigger = node.branch.trigger.value
+                fallback = "notExist" if trigger == BranchTrigger.EXIST.value else "exist"
+                return [
+                    (trigger, node.branch.primary_target.strip()),
+                    (fallback, node.branch.secondary_target.strip()),
+                ]
+            if node.branch.mode is BranchMode.SUBFLOW and node.branch.primary_target.strip():
+                return [(f"{node.branch.trigger.value} subflow", node.branch.primary_target.strip())]
+        return []
+
+    def _apply_node_table_style(
+        self,
+        node: OperationNode,
+        issue_node_ids: set[str],
+        items: list[QTableWidgetItem],
+    ) -> None:
+        color = _operation_color(node.operation)
+        type_item = items[1]
+        type_item.setBackground(QBrush(color.lighter(175)))
+        type_item.setForeground(QBrush(color.darker(170)))
+        type_font = QFont(type_item.font())
+        type_font.setBold(True)
+        type_item.setFont(type_font)
+
+        if node.jump_mark:
+            mark_item = items[2]
+            mark_item.setForeground(QBrush(QColor("#1d4ed8")))
+            mark_font = QFont(mark_item.font())
+            mark_font.setBold(True)
+            mark_item.setFont(mark_font)
+
+        if self._target_references(node):
+            target_item = items[3]
+            target_item.setForeground(QBrush(QColor("#047857")))
+            target_font = QFont(target_item.font())
+            target_font.setBold(True)
+            target_item.setFont(target_font)
+
+        if node.node_id in issue_node_ids:
+            for item in items:
+                item.setBackground(QBrush(QColor("#fff1f2")))
+            items[4].setForeground(QBrush(QColor("#b91c1c")))
 
     def _on_flow_selection_changed(self) -> None:
         selected = self.flow_tree.selectedItems()
@@ -374,6 +521,26 @@ class EditorMainWindow(QMainWindow):
             return
         self.current_node_id = flow.nodes[current_row].node_id
         self.inspector.set_node(flow.nodes[current_row])
+
+    def _on_node_table_item_activated(self, item: QTableWidgetItem) -> None:
+        targets = item.data(TARGET_ROLE)
+        if not isinstance(targets, list) or not targets:
+            return
+        if len(targets) == 1:
+            self._select_node_by_target(targets[0][1])
+            return
+
+        menu = QMenu(self)
+        for label, target in targets:
+            action = menu.addAction(f"{label} -> {target}")
+            action.setData(target)
+        rect = self.node_table.visualItemRect(item)
+        chosen = menu.exec(self.node_table.viewport().mapToGlobal(rect.center()))
+        if chosen is None:
+            return
+        target = chosen.data()
+        if isinstance(target, str):
+            self._select_node_by_target(target)
 
     def _on_issue_selection_changed(self) -> None:
         items = self.validation_list.selectedItems()
@@ -649,6 +816,7 @@ class EditorMainWindow(QMainWindow):
             (self.import_nodes_action, "从其他自动化选择节点并复制到剪贴板"),
             (self.record_nodes_action, "录制键鼠操作并复制成节点"),
             (self.scan_unused_images_action, "扫描当前配置目录下未使用的图片"),
+            (self.show_csv_preview_action, "弹窗查看当前流程编译后的 CSV 原始数据"),
             (self.undo_action, "撤销上一步操作"),
             (self.redo_action, "重做上一步撤销的操作"),
             (self.add_node_action, "在当前节点后新增节点"),
@@ -715,6 +883,8 @@ class EditorMainWindow(QMainWindow):
             self.reload_action,
             self.import_nodes_action,
             self.record_nodes_action,
+            self.scan_unused_images_action,
+            self.show_csv_preview_action,
             self.add_node_action,
             self.copy_nodes_action,
             self.paste_nodes_action,
@@ -1016,6 +1186,44 @@ class ImagePreviewDialog(QDialog):
         layout.addWidget(preview, 1)
 
 
+def _operation_color(operation: str) -> QColor:
+    colors = {
+        OperationType.PIC.value: QColor("#2563eb"),
+        OperationType.OCR.value: QColor("#7c3aed"),
+        OperationType.CLICK.value: QColor("#059669"),
+        OperationType.MOUSE_DOWN.value: QColor("#059669"),
+        OperationType.MOUSE_UP.value: QColor("#059669"),
+        OperationType.MOVE_REL.value: QColor("#0891b2"),
+        OperationType.MOVE_TO.value: QColor("#0891b2"),
+        OperationType.JUMP.value: QColor("#ea580c"),
+        OperationType.WRITE.value: QColor("#9333ea"),
+        OperationType.PRESS.value: QColor("#4f46e5"),
+        OperationType.KEY_DOWN.value: QColor("#4f46e5"),
+        OperationType.KEY_UP.value: QColor("#4f46e5"),
+        OperationType.NOTIFY.value: QColor("#ca8a04"),
+    }
+    return colors.get(operation, QColor("#71717a"))
+
+
+def resolve_target_node(flow: FlowDocument, target: str) -> OperationNode | None:
+    target = target.strip()
+    if not target:
+        return None
+
+    for node in flow.nodes:
+        if node.jump_mark == target:
+            return node
+
+    try:
+        index = int(target)
+    except ValueError:
+        return None
+
+    if 1 <= index <= len(flow.nodes):
+        return flow.nodes[index - 1]
+    return None
+
+
 class NodeInspector(QWidget):
     node_changed = Signal(OperationNode)
     action_requested = Signal(str, str)
@@ -1101,6 +1309,7 @@ class NodeInspector(QWidget):
         common_group = QGroupBox("通用属性")
         common_form = QFormLayout(common_group)
         operation_combo = QComboBox()
+        self._normalize_combo(operation_combo)
         for item in OperationType:
             operation_combo.addItem(item.value)
         operation_combo.setCurrentText(node.operation)
@@ -1130,6 +1339,7 @@ class NodeInspector(QWidget):
             OperationType.MOUSE_UP.value,
         }:
             combo = QComboBox()
+            self._normalize_combo(combo)
             for button in ["left", "middle", "right", "x1", "x2"]:
                 combo.addItem(button)
             combo.setCurrentText(node.param_text or "left")
@@ -1190,6 +1400,7 @@ class NodeInspector(QWidget):
             branch_group = QGroupBox("分支")
             branch_form = QFormLayout(branch_group)
             trigger_combo = QComboBox()
+            self._normalize_combo(trigger_combo)
             for item in [BranchTrigger.NONE.value, BranchTrigger.EXIST.value, BranchTrigger.NOT_EXIST.value]:
                 trigger_combo.addItem(item)
             trigger_combo.setCurrentText(node.branch.trigger.value)
@@ -1198,6 +1409,7 @@ class NodeInspector(QWidget):
             branch_form.addRow("触发条件", trigger_combo)
 
             mode_combo = QComboBox()
+            self._normalize_combo(mode_combo)
             for item in [BranchMode.NONE.value, BranchMode.SUBFLOW.value, BranchMode.JUMP_PAIR.value]:
                 mode_combo.addItem(item)
             mode_combo.setCurrentText(node.branch.mode.value)
@@ -1216,12 +1428,14 @@ class NodeInspector(QWidget):
 
     def _line_edit(self, form: QFormLayout, label: str, value: str) -> QLineEdit:
         edit = QLineEdit(value)
+        self._normalize_field(edit)
         edit.editingFinished.connect(self._emit_change)
         form.addRow(label, edit)
         return edit
 
     def _editable_combo(self, form: QFormLayout, label: str, value: str, options: list[str]) -> QComboBox:
         combo = QComboBox()
+        self._normalize_combo(combo)
         combo.setEditable(True)
         combo.addItems(options)
         combo.setCurrentText(value)
@@ -1234,6 +1448,7 @@ class NodeInspector(QWidget):
 
     def _line_with_button(self, form: QFormLayout, label: str, value: str, button_text: str, action: str) -> QLineEdit:
         edit = QLineEdit(value)
+        self._normalize_field(edit)
         edit.editingFinished.connect(self._emit_change)
         button = QPushButton(button_text)
         button.clicked.connect(lambda: self._request_action(action))
@@ -1244,6 +1459,16 @@ class NodeInspector(QWidget):
         layout.addWidget(button)
         form.addRow(label, row)
         return edit
+
+    def _normalize_field(self, widget: QWidget) -> None:
+        widget.setMinimumWidth(0)
+        widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+    def _normalize_combo(self, combo: QComboBox) -> None:
+        combo.setMinimumWidth(0)
+        combo.setMinimumContentsLength(1)
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
 
     def _action_button(self, text: str, action: str) -> QPushButton:
         button = QPushButton(text)
