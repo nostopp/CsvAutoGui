@@ -93,7 +93,7 @@ class EditorMainWindow(QMainWindow):
         self.save_action = QAction("保存 CSV", self)
         self.reload_action = QAction("重新加载", self)
         self.import_nodes_action = QAction("从其他自动化复制节点…", self)
-        self.record_nodes_action = QAction("录制操作…", self)
+        self.record_nodes_action = QAction("录制模式…", self)
         self.scan_unused_images_action = QAction("扫描未使用图片", self)
         self.show_csv_preview_action = QAction("查看 CSV 原始数据…", self)
         self.undo_action = self.undo_stack.createUndoAction(self, "撤销")
@@ -814,7 +814,7 @@ class EditorMainWindow(QMainWindow):
             (self.save_action, "保存当前 CSV"),
             (self.reload_action, "重新加载当前配置目录"),
             (self.import_nodes_action, "从其他自动化选择节点并复制到剪贴板"),
-            (self.record_nodes_action, "录制键鼠操作并复制成节点"),
+            (self.record_nodes_action, "录制键鼠操作和 OCR/PIC 标记并复制成节点"),
             (self.scan_unused_images_action, "扫描当前配置目录下未使用的图片"),
             (self.show_csv_preview_action, "弹窗查看当前流程编译后的 CSV 原始数据"),
             (self.undo_action, "撤销上一步操作"),

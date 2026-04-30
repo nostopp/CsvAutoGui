@@ -13,6 +13,8 @@ MAGNIFIER_CONTENT_SIZE = MAGNIFIER_SOURCE_SIZE * MAGNIFIER_ZOOM
 MAGNIFIER_MARGIN = 12
 MAGNIFIER_OFFSET = 24
 MAGNIFIER_TEXT_HEIGHT = 28
+PROMPT_MARGIN = 16
+PROMPT_HEIGHT = 32
 
 
 @dataclass(slots=True)
@@ -38,24 +40,25 @@ class CapturedPoint:
         return f"{self.x};{self.y}"
 
 
-def capture_region(parent: QWidget | None = None) -> CapturedRegion | None:
-    dialog = _CaptureOverlayDialog(mode="region", parent=parent)
+def capture_region(parent: QWidget | None = None, prompt: str = "") -> CapturedRegion | None:
+    dialog = _CaptureOverlayDialog(mode="region", parent=parent, prompt=prompt)
     if dialog.exec() == QDialog.Accepted:
         return dialog.result_region
     return None
 
 
-def capture_point(parent: QWidget | None = None) -> CapturedPoint | None:
-    dialog = _CaptureOverlayDialog(mode="point", parent=parent)
+def capture_point(parent: QWidget | None = None, prompt: str = "") -> CapturedPoint | None:
+    dialog = _CaptureOverlayDialog(mode="point", parent=parent, prompt=prompt)
     if dialog.exec() == QDialog.Accepted:
         return dialog.result_point
     return None
 
 
 class _CaptureOverlayDialog(QDialog):
-    def __init__(self, mode: str, parent: QWidget | None = None) -> None:
+    def __init__(self, mode: str, parent: QWidget | None = None, prompt: str = "") -> None:
         super().__init__(parent)
         self.mode = mode
+        self.prompt = prompt
         self.result_region: CapturedRegion | None = None
         self.result_point: CapturedPoint | None = None
         self._virtual_geometry = _virtual_geometry()
@@ -140,6 +143,7 @@ class _CaptureOverlayDialog(QDialog):
                 painter.drawRect(selection)
 
         self._draw_magnifier(painter)
+        self._draw_prompt(painter)
 
     def _selection_rect(self) -> QRect:
         if self._start_pos is None or self._end_pos is None:
@@ -196,6 +200,16 @@ class _CaptureOverlayDialog(QDialog):
             Qt.AlignCenter,
             f"X:{global_point.x()}  Y:{global_point.y()}  {MAGNIFIER_ZOOM}x",
         )
+
+    def _draw_prompt(self, painter: QPainter) -> None:
+        if not self.prompt:
+            return
+        rect = QRect(PROMPT_MARGIN, PROMPT_MARGIN, min(520, max(260, self.width() - PROMPT_MARGIN * 2)), PROMPT_HEIGHT)
+        painter.fillRect(rect, QColor(18, 18, 18, 220))
+        painter.setPen(QPen(QColor("#4da3ff"), 1))
+        painter.drawRect(rect)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(rect.adjusted(10, 0, -10, 0), Qt.AlignVCenter | Qt.AlignLeft, self.prompt)
 
     def _magnifier_source_rect(self, center: QPoint) -> QRect:
         pixmap_width = self._pixmap.width()
