@@ -366,7 +366,7 @@ class BackGroundInput(BaseInput):
     def _endMouseActivation(self):
         if not self._mouse_activation_held:
             return
-        self.deactivate()
+        # self.deactivate()
         self._mouse_activation_held = False
 
     def moveTo(self, x, y, duration=0.0):
