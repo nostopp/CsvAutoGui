@@ -220,7 +220,7 @@ def OCR(findStr:str, input:BaseInput, findRegion=None, confidence:float = 0.8) -
         targetStr = split[1]
         xCenter, yCenter, width, height = CompareNumInResult(result, targetStr, confidence, compare)
     else:
-        xCenter, yCenter, width, height = FindTextInResult(result, findStr, confidence)
+        xCenter, yCenter, width, height = FindTextInResult(result, findStr.lower(), confidence)
 
     if xCenter != None and yCenter != None and findRegion and len(findRegion) == 4:
         xCenter += findRegion[0]
