@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, Qt, Signal
+from PySide6.QtCore import QMimeData, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QFont, QGuiApplication, QKeySequence, QPixmap, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -227,6 +227,7 @@ class EditorMainWindow(QMainWindow):
         self.node_table.customContextMenuRequested.connect(self._show_node_context_menu)
         self.inspector.node_changed.connect(self._on_node_changed)
         self.inspector.action_requested.connect(self._on_inspector_action)
+        self.inspector.image_preview_requested.connect(self._open_image_preview)
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.undo_stack.indexChanged.connect(self._on_undo_stack_index_changed)
 
@@ -328,6 +329,7 @@ class EditorMainWindow(QMainWindow):
     def _refresh_node_table(self) -> None:
         self.node_table.blockSignals(True)
         self.node_table.setRowCount(0)
+        self.inspector.set_root_path(self.document.root_path if self.document else None)
         flow = self.current_flow
         if not flow:
             self.node_table.blockSignals(False)
@@ -643,6 +645,10 @@ class EditorMainWindow(QMainWindow):
             self.undo_stack.push(UpdateNodeCommand(self, flow.filename, before, after, "拾取坐标"))
         else:
             return
+
+    def _open_image_preview(self, image_path: Path) -> None:
+        dialog = ImagePreviewDialog(image_path, self)
+        dialog.exec()
 
     def _capture_region_with_hidden_window(self):
         self.showMinimized()
@@ -1186,6 +1192,92 @@ class ImagePreviewDialog(QDialog):
         layout.addWidget(preview, 1)
 
 
+PIC_INLINE_PREVIEW_HEIGHT = 160
+
+
+class PicInlinePreviewLabel(QLabel):
+    image_requested = Signal(object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._source_pixmap = QPixmap()
+        self._image_path: Path | None = None
+        self.setObjectName("picInlinePreview")
+        self.setAlignment(Qt.AlignCenter)
+        self.setFixedHeight(PIC_INLINE_PREVIEW_HEIGHT)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.setScaledContents(False)
+        self.setStyleSheet("QLabel#picInlinePreview { border: 1px solid #d4d4d8; color: #71717a; }")
+        self._set_status("未设置图片文件")
+
+    @property
+    def image_path(self) -> Path | None:
+        return self._image_path
+
+    def sizeHint(self) -> QSize:
+        return QSize(220, PIC_INLINE_PREVIEW_HEIGHT)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, PIC_INLINE_PREVIEW_HEIGHT)
+
+    def set_image(self, root_path: Path | None, filename: str) -> None:
+        filename = filename.strip()
+        self._source_pixmap = QPixmap()
+        self._image_path = None
+
+        if not filename:
+            self._set_status("未设置图片文件")
+            return
+        if root_path is None:
+            self._set_status("未选择配置目录")
+            return
+
+        image_path = root_path / filename
+        if not image_path.exists():
+            self._set_status("图片不存在")
+            self.setToolTip(str(image_path))
+            return
+
+        pixmap = QPixmap(str(image_path))
+        if pixmap.isNull():
+            self._set_status("无法加载图片")
+            self.setToolTip(str(image_path))
+            return
+
+        self._source_pixmap = pixmap
+        self._image_path = image_path
+        self.setText("")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(f"点击查看大图: {image_path.name}")
+        self._sync_scaled_pixmap()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_scaled_pixmap()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton and self._image_path is not None:
+            self.image_requested.emit(self._image_path)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def _set_status(self, text: str) -> None:
+        self.clear()
+        self.setText(text)
+        self.setCursor(Qt.ArrowCursor)
+        self.setToolTip("")
+
+    def _sync_scaled_pixmap(self) -> None:
+        if self._source_pixmap.isNull():
+            return
+        target_width = max(1, self.width() - 8)
+        target_height = max(1, self.height() - 8)
+        scaled = self._source_pixmap.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.setPixmap(scaled)
+
+
 def _operation_color(operation: str) -> QColor:
     colors = {
         OperationType.PIC.value: QColor("#2563eb"),
@@ -1227,10 +1319,12 @@ def resolve_target_node(flow: FlowDocument, target: str) -> OperationNode | None
 class NodeInspector(QWidget):
     node_changed = Signal(OperationNode)
     action_requested = Signal(str, str)
+    image_preview_requested = Signal(object)
 
     def __init__(self) -> None:
         super().__init__()
         self._current_node: OperationNode | None = None
+        self._root_path: Path | None = None
         self._building = False
         self._widgets: dict[str, QWidget] = {}
         self._jump_target_options: list[str] = []
@@ -1253,6 +1347,9 @@ class NodeInspector(QWidget):
     def set_reference_data(self, jump_targets: list[str], subflow_targets: list[str]) -> None:
         self._jump_target_options = jump_targets
         self._subflow_options = subflow_targets
+
+    def set_root_path(self, root_path: Path | None) -> None:
+        self._root_path = root_path
 
     def set_node(self, node: OperationNode | None) -> None:
         if node is None:
@@ -1289,6 +1386,7 @@ class NodeInspector(QWidget):
             item = self.layout.takeAt(0)
             widget = item.widget()
             if widget:
+                widget.setParent(None)
                 widget.deleteLater()
 
     def _rebuild(self) -> None:
@@ -1420,8 +1518,19 @@ class NodeInspector(QWidget):
             branch_options = list(dict.fromkeys(self._subflow_options + self._jump_target_options))
             self._widgets["branch_primary_target"] = self._editable_combo(branch_form, "主目标", node.branch.primary_target, branch_options)
             self._widgets["branch_secondary_target"] = self._editable_combo(branch_form, "次目标", node.branch.secondary_target, branch_options)
-            self.layout.addWidget(branch_group)
-            return group
+
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.addWidget(group)
+            container_layout.addWidget(branch_group)
+            if operation == OperationType.PIC.value:
+                preview = PicInlinePreviewLabel()
+                preview.set_image(self._root_path, node.search_target)
+                preview.image_requested.connect(self.image_preview_requested)
+                self._widgets["pic_preview"] = preview
+                container_layout.addWidget(preview)
+            return container
 
         form.addRow("说明", QLabel("当前操作暂未配置专门表单"))
         return group
