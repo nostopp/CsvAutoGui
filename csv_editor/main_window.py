@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QFont, QGuiApplication, QKeySequence, QPixmap, QUndoStack
+from PySide6.QtGui import QAction, QBrush, QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPixmap, QShortcut, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -63,6 +63,9 @@ from csv_editor.undo_commands import DeleteNodeCommand, InsertNodeCommand, MoveN
 CAPTURE_HIDE_DELAY_SECONDS = 0.2
 NODE_ID_ROLE = Qt.UserRole
 TARGET_ROLE = Qt.UserRole + 1
+UNUSED_IMAGE_NAME_ROLE = Qt.UserRole + 2
+UNUSED_IMAGE_THUMBNAIL_SIZE = QSize(128, 96)
+UNUSED_IMAGE_GRID_SIZE = QSize(168, 148)
 
 
 class EditorMainWindow(QMainWindow):
@@ -1091,75 +1094,154 @@ class UnusedImagesDialog(QDialog):
         super().__init__(parent)
         self.root_path = root_path
         self.setWindowTitle("未使用图片")
-        self.resize(520, 420)
+        self.resize(760, 520)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(f"配置目录: {root_path}"))
 
         self.list_widget = QListWidget()
+        self.list_widget.setViewMode(QListWidget.IconMode)
+        self.list_widget.setResizeMode(QListWidget.Adjust)
+        self.list_widget.setMovement(QListWidget.Static)
+        self.list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.list_widget.setIconSize(UNUSED_IMAGE_THUMBNAIL_SIZE)
+        self.list_widget.setGridSize(UNUSED_IMAGE_GRID_SIZE)
+        self.list_widget.setSpacing(8)
+        self.list_widget.setWordWrap(True)
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.list_widget.itemDoubleClicked.connect(self._preview_item)
         layout.addWidget(self.list_widget, 1)
+        self.delete_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self.list_widget)
+        self.delete_shortcut.activated.connect(self._delete_selected_items)
 
         for image_name in image_names:
-            self.list_widget.addItem(QListWidgetItem(image_name))
+            self.list_widget.addItem(self._create_image_item(image_name))
 
         if not image_names:
             self.list_widget.addItem(QListWidgetItem("未扫描到未使用图片"))
             self.list_widget.setEnabled(False)
 
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Delete and self.list_widget.isEnabled():
+            self._delete_selected_items()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _create_image_item(self, image_name: str) -> QListWidgetItem:
+        item = QListWidgetItem(image_name)
+        image_path = self.root_path / image_name
+        item.setData(UNUSED_IMAGE_NAME_ROLE, image_name)
+        item.setSizeHint(UNUSED_IMAGE_GRID_SIZE)
+        item.setToolTip(str(image_path))
+
+        pixmap = QPixmap(str(image_path))
+        if not pixmap.isNull():
+            thumbnail = pixmap.scaled(UNUSED_IMAGE_THUMBNAIL_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            item.setIcon(QIcon(thumbnail))
+        return item
+
     def _show_context_menu(self, position) -> None:
         item = self.list_widget.itemAt(position)
         if item is None or not self.list_widget.isEnabled():
             return
+        if not item.isSelected():
+            self.list_widget.clearSelection()
+            item.setSelected(True)
+        selected_items = self._selected_image_items()
+        if not selected_items:
+            return
         menu = QMenu(self)
         copy_action = menu.addAction("复制图片名")
-        delete_action = menu.addAction("删除图片")
+        delete_action = menu.addAction("删除选中图片")
         chosen = menu.exec(self.list_widget.viewport().mapToGlobal(position))
         if chosen is copy_action:
-            QGuiApplication.clipboard().setText(item.text())
+            QGuiApplication.clipboard().setText("\n".join(self._image_name(selected_item) for selected_item in selected_items))
         elif chosen is delete_action:
-            self._delete_item(item)
+            self._delete_items(selected_items)
 
     def _preview_item(self, item: QListWidgetItem) -> None:
         if not self.list_widget.isEnabled():
             return
-        image_path = self.root_path / item.text()
+        image_path = self.root_path / self._image_name(item)
         if not image_path.exists():
             QMessageBox.warning(self, "图片不存在", f"未找到文件: {image_path}")
             return
         dialog = ImagePreviewDialog(image_path, self)
         dialog.exec()
 
-    def _delete_item(self, item: QListWidgetItem) -> None:
-        image_path = self.root_path / item.text()
-        if not image_path.exists():
-            QMessageBox.warning(self, "图片不存在", f"未找到文件: {image_path}")
-            row = self.list_widget.row(item)
-            self.list_widget.takeItem(row)
+    def _delete_selected_items(self) -> None:
+        self._delete_items(self._selected_image_items())
+
+    def _delete_items(self, items: list[QListWidgetItem]) -> None:
+        if not items:
+            return
+
+        existing: list[tuple[QListWidgetItem, Path]] = []
+        missing: list[QListWidgetItem] = []
+        for item in items:
+            image_path = self.root_path / self._image_name(item)
+            if image_path.exists():
+                existing.append((item, image_path))
+            else:
+                missing.append(item)
+
+        if missing:
+            QMessageBox.warning(self, "图片不存在", f"{len(missing)} 个图片文件已不存在，已从列表移除。")
+            self._remove_items(missing)
+
+        if not existing:
             self._sync_empty_state()
             return
 
+        names_preview = self._format_image_names([path.name for _, path in existing])
         reply = QMessageBox.question(
             self,
             "确认删除",
-            f"确定删除图片？\n{image_path.name}",
+            f"确定删除 {len(existing)} 张图片？\n{names_preview}",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
 
-        try:
-            image_path.unlink()
-        except OSError as exc:
-            QMessageBox.critical(self, "删除失败", f"无法删除图片：{exc}")
-            return
+        deleted_items: list[QListWidgetItem] = []
+        failures: list[str] = []
+        for item, image_path in existing:
+            try:
+                image_path.unlink()
+            except OSError as exc:
+                failures.append(f"{image_path.name}: {exc}")
+            else:
+                deleted_items.append(item)
 
-        row = self.list_widget.row(item)
-        self.list_widget.takeItem(row)
+        self._remove_items(deleted_items)
+        if failures:
+            QMessageBox.critical(self, "删除失败", "以下图片删除失败：\n" + "\n".join(failures))
         self._sync_empty_state()
+
+    def _selected_image_items(self) -> list[QListWidgetItem]:
+        if not self.list_widget.isEnabled():
+            return []
+        return [item for item in self.list_widget.selectedItems() if item.data(UNUSED_IMAGE_NAME_ROLE)]
+
+    def _image_name(self, item: QListWidgetItem) -> str:
+        return item.data(UNUSED_IMAGE_NAME_ROLE) or item.text()
+
+    def _remove_items(self, items: list[QListWidgetItem]) -> None:
+        rows = sorted((self.list_widget.row(item) for item in items), reverse=True)
+        for row in rows:
+            if row >= 0:
+                self.list_widget.takeItem(row)
+
+    @staticmethod
+    def _format_image_names(image_names: list[str]) -> str:
+        visible = image_names[:12]
+        message = "\n".join(visible)
+        if len(image_names) > len(visible):
+            message += f"\n... 另有 {len(image_names) - len(visible)} 张"
+        return message
 
     def _sync_empty_state(self) -> None:
         if self.list_widget.count() > 0:
