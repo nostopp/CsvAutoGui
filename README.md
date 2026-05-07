@@ -22,6 +22,10 @@
    ```
    CSV 可视化编辑器
    ```powershell
+   cd csv_editor/webui
+   npm install
+   npm run build
+   cd ../..
    uv run python -m csv_editor
    ```
 

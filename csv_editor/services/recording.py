@@ -3,12 +3,17 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any
-
-from PySide6.QtCore import QObject, Signal
+from typing import Any, Callable
 
 from csv_editor.domain.enums import BranchMode, BranchTrigger, OperationType
 from csv_editor.domain.models import BranchConfig, FlowDocument, OperationNode
+
+try:
+    from PySide6.QtCore import QCoreApplication, QObject, Signal
+except ModuleNotFoundError:
+    QCoreApplication = None
+    QObject = None
+    Signal = None
 
 STOP_HOTKEY = "shift+x"
 SHIFT_KEY_NAMES = {"shift", "left shift", "right shift"}
@@ -82,11 +87,141 @@ class NodeGroup:
     end_time: float
 
 
-class RecordingService(QObject):
-    stop_requested = Signal()
+@dataclass(slots=True)
+class RecordingState:
+    is_recording: bool
+    stop_pending: bool
+    capture_paused: bool
+    event_count: int
+    target_window: VisibleWindowInfo | None
+    coordinate_mode: str
+    match_child_window: bool
+    overlay_visible: bool
+    ignored_rect_count: int
+    suppressing_events: bool
 
+
+@dataclass(slots=True)
+class RecordingReviewRow:
+    source: str
+    semantic: str
+    node_text: str
+    target_text: str
+    region_text: str
+    strategy_text: str
+    wait_text: str
+    note_text: str
+
+
+@dataclass(slots=True)
+class RecordingSummary:
+    total: int
+    visual_count: int
+    wait_count: int
+    locator_count: int
+    input_count: int
+
+
+if QObject is not None and Signal is not None:
+    class _QtSignalBridge(QObject):
+        emitted = Signal(object, object)
+
+        def __init__(self, dispatcher: "_CallbackSignal") -> None:
+            super().__init__()
+            self._dispatcher = dispatcher
+            self.emitted.connect(self._dispatch)
+
+        def _dispatch(self, args: object, kwargs: object) -> None:
+            self._dispatcher._dispatch(tuple(args), dict(kwargs))
+else:
+    _QtSignalBridge = None
+
+
+class _CallbackSignal:
     def __init__(self) -> None:
-        super().__init__()
+        self._callbacks: list[Callable[..., None]] = []
+        self._lock = Lock()
+        self._qt_bridge = self._create_qt_bridge()
+
+    def connect(self, callback: Callable[..., None]) -> None:
+        with self._lock:
+            if callback not in self._callbacks:
+                self._callbacks.append(callback)
+        if self._qt_bridge is None:
+            self._qt_bridge = self._create_qt_bridge()
+
+    def disconnect(self, callback: Callable[..., None]) -> None:
+        with self._lock:
+            self._callbacks = [item for item in self._callbacks if item != callback]
+
+    def emit(self, *args: object, **kwargs: object) -> None:
+        if self._qt_bridge is not None:
+            self._qt_bridge.emitted.emit(tuple(args), dict(kwargs))
+            return
+        self._dispatch(args, kwargs)
+
+    def _dispatch(self, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
+        with self._lock:
+            callbacks = tuple(self._callbacks)
+        for callback in callbacks:
+            callback(*args, **kwargs)
+
+    def _create_qt_bridge(self) -> _QtSignalBridge | None:
+        if _QtSignalBridge is None or QCoreApplication is None:
+            return None
+        if QCoreApplication.instance() is None:
+            return None
+        return _QtSignalBridge(self)
+
+
+class RecordingSession:
+    def __init__(self, recorder: "RecordingService | None" = None) -> None:
+        self.recorder = recorder or RecordingService()
+        self._stop_callback: Callable[[], None] | None = None
+        self.recorder.stop_requested.connect(self._handle_stop_requested)
+
+    def start(self, stop_callback: Callable[[], None] | None = None) -> RecordingState:
+        if stop_callback is not None:
+            self._stop_callback = stop_callback
+        self.recorder.start()
+        return self.get_state()
+
+    def stop(self) -> list[OperationNode]:
+        return self.recorder.stop()
+
+    def build_nodes(self) -> list[OperationNode]:
+        return self.recorder.build_nodes()
+
+    def set_stop_callback(self, callback: Callable[[], None] | None) -> None:
+        self._stop_callback = callback
+
+    def get_state(self) -> RecordingState:
+        return self.recorder.get_state()
+
+    def set_capture_paused(self, paused: bool) -> RecordingState:
+        self.recorder.set_capture_paused(paused)
+        return self.get_state()
+
+    def set_overlay_visible(self, visible: bool) -> RecordingState:
+        self.recorder.set_overlay_visible(visible)
+        return self.get_state()
+
+    def suppress_events_for(self, seconds: float) -> RecordingState:
+        self.recorder.suppress_events_for(seconds)
+        return self.get_state()
+
+    def set_ignored_screen_rects(self, rects: list[tuple[int, int, int, int]]) -> RecordingState:
+        self.recorder.set_ignored_screen_rects(rects)
+        return self.get_state()
+
+    def _handle_stop_requested(self) -> None:
+        if self._stop_callback is not None:
+            self._stop_callback()
+
+
+class RecordingService:
+    def __init__(self) -> None:
+        self.stop_requested = _CallbackSignal()
         self._keyboard_module: Any | None = None
         self._mouse_module: Any | None = None
         self._events: list[RecordedEvent] = []
@@ -98,7 +233,9 @@ class RecordingService(QObject):
         self._ignored_screen_rects: list[tuple[int, int, int, int]] = []
         self._pressed_keys: set[str] = set()
         self._target_window: VisibleWindowInfo | None = None
+        self._coordinate_mode = "screen"
         self._match_child_window = False
+        self._overlay_visible = False
         self._keyboard_hook = None
         self._mouse_hook = None
         self._stop_hotkey_time: float | None = None
@@ -107,12 +244,35 @@ class RecordingService(QObject):
     def is_recording(self) -> bool:
         return self._recording
 
+    def get_state(self) -> RecordingState:
+        with self._lock:
+            event_count = len(self._events)
+            ignored_rect_count = len(self._ignored_screen_rects)
+        return RecordingState(
+            is_recording=self._recording,
+            stop_pending=self._stop_pending,
+            capture_paused=self._capture_paused,
+            event_count=event_count,
+            target_window=self._target_window,
+            coordinate_mode=self._coordinate_mode,
+            match_child_window=self._match_child_window,
+            overlay_visible=self._overlay_visible,
+            ignored_rect_count=ignored_rect_count,
+            suppressing_events=self._is_temporarily_suppressed(),
+        )
+
     def set_target_window(self, window_info: VisibleWindowInfo | None, match_child_window: bool = False) -> None:
         self._target_window = window_info
         self._match_child_window = match_child_window
 
+    def set_coordinate_mode(self, coordinate_mode: str) -> None:
+        self._coordinate_mode = coordinate_mode
+
     def set_capture_paused(self, paused: bool) -> None:
         self._capture_paused = paused
+
+    def set_overlay_visible(self, visible: bool) -> None:
+        self._overlay_visible = visible
 
     def suppress_events_for(self, seconds: float) -> None:
         self._suppress_events_until = max(self._suppress_events_until, time.time() + max(0.0, seconds))
@@ -149,9 +309,8 @@ class RecordingService(QObject):
             return
 
         self._ensure_dependencies()
-        if self._target_window:
-            if not self._is_window_handle_valid(self._target_window.hwnd):
-                raise RuntimeError(f"目标窗口已失效：{self._target_window.display_text}")
+        if self._target_window and not self._is_window_handle_valid(self._target_window.hwnd):
+            raise RuntimeError(f"目标窗口已失效：{self._target_window.display_text}")
 
         with self._lock:
             self._events = []
@@ -160,6 +319,7 @@ class RecordingService(QObject):
         self._capture_paused = False
         self._suppress_events_until = 0.0
         self._ignored_screen_rects = []
+        self._overlay_visible = False
         self._pressed_keys.clear()
 
         self._keyboard_hook = self._keyboard_module.hook(self._on_keyboard_event)
@@ -173,6 +333,7 @@ class RecordingService(QObject):
         self._recording = False
         self._stop_pending = False
         self._capture_paused = False
+        self._overlay_visible = False
         self._ignored_screen_rects = []
         self._pressed_keys.clear()
 
@@ -206,13 +367,7 @@ class RecordingService(QObject):
             if isinstance(event, VisualMarkEvent):
                 mark_node = self._build_visual_mark_node(event, visual_mark_counter)
                 visual_mark_counter += 1
-                groups.append(
-                    NodeGroup(
-                        nodes=[mark_node],
-                        start_time=event.timestamp,
-                        end_time=event.timestamp,
-                    )
-                )
+                groups.append(NodeGroup(nodes=[mark_node], start_time=event.timestamp, end_time=event.timestamp))
                 pending_locator = event if event.action == VisualMarkAction.LOCATE else None
                 index += 1
                 continue
@@ -236,13 +391,7 @@ class RecordingService(QObject):
 
                 mouse_down_nodes = self._build_mouse_position_nodes(event, pending_locator)
                 mouse_down_nodes.append(self._build_node(OperationType.MOUSE_DOWN.value, event.value))
-                groups.append(
-                    NodeGroup(
-                        nodes=mouse_down_nodes,
-                        start_time=event.timestamp,
-                        end_time=event.timestamp,
-                    )
-                )
+                groups.append(NodeGroup(nodes=mouse_down_nodes, start_time=event.timestamp, end_time=event.timestamp))
                 pending_locator = None
                 index += 1
                 continue
@@ -250,10 +399,7 @@ class RecordingService(QObject):
             if event.operation == OperationType.MOUSE_UP.value:
                 groups.append(
                     NodeGroup(
-                        nodes=[
-                            self._build_move_to_node(event),
-                            self._build_node(OperationType.MOUSE_UP.value, event.value),
-                        ],
+                        nodes=[self._build_move_to_node(event), self._build_node(OperationType.MOUSE_UP.value, event.value)],
                         start_time=event.timestamp,
                         end_time=event.timestamp,
                     )
@@ -317,7 +463,7 @@ class RecordingService(QObject):
         self._stop_hotkey_time = time.time()
         self.stop_requested.emit()
 
-    def _on_keyboard_event(self, event) -> None:
+    def _on_keyboard_event(self, event: object) -> None:
         if not self._recording or self._capture_paused or self._is_temporarily_suppressed():
             return
 
@@ -341,16 +487,15 @@ class RecordingService(QObject):
         if self._stop_pending and key_name in STOP_HOTKEY_KEYS:
             return
 
-        operation = OperationType.KEY_DOWN.value if event_type == "down" else OperationType.KEY_UP.value
         self._append_event(
             RawRecordedEvent(
-                operation=operation,
+                operation=OperationType.KEY_DOWN.value if event_type == "down" else OperationType.KEY_UP.value,
                 value=key_name,
                 timestamp=time.time(),
             )
         )
 
-    def _on_mouse_event(self, event) -> None:
+    def _on_mouse_event(self, event: object) -> None:
         if not self._recording or self._capture_paused or self._is_temporarily_suppressed():
             return
 
@@ -369,11 +514,10 @@ class RecordingService(QObject):
         if self._is_ignored_screen_position(mouse_x, mouse_y):
             return
 
-        operation = OperationType.MOUSE_DOWN.value if event_type == "down" else OperationType.MOUSE_UP.value
         transformed_x, transformed_y = self._transform_mouse_position(mouse_x, mouse_y)
         self._append_event(
             RawRecordedEvent(
-                operation=operation,
+                operation=OperationType.MOUSE_DOWN.value if event_type == "down" else OperationType.MOUSE_UP.value,
                 value=button,
                 timestamp=time.time(),
                 x=transformed_x,
@@ -390,13 +534,11 @@ class RecordingService(QObject):
     def _ensure_dependencies(self) -> None:
         if self._keyboard_module is not None and self._mouse_module is not None:
             return
-
         try:
             import keyboard as keyboard_module
             import mouse as mouse_module
         except ModuleNotFoundError as exc:
             raise RuntimeError("缺少录制依赖，请先安装 keyboard 和 mouse。") from exc
-
         self._keyboard_module = keyboard_module
         self._mouse_module = mouse_module
 
@@ -410,8 +552,7 @@ class RecordingService(QObject):
                 event = self._events[-1]
                 if (
                     isinstance(event, RawRecordedEvent)
-                    and
-                    event.operation in {OperationType.KEY_DOWN.value, OperationType.KEY_UP.value}
+                    and event.operation in {OperationType.KEY_DOWN.value, OperationType.KEY_UP.value}
                     and event.value in STOP_HOTKEY_KEYS
                     and event.timestamp >= cutoff
                 ):
@@ -420,18 +561,12 @@ class RecordingService(QObject):
                 break
 
     def _is_stop_hotkey_event(self, key_name: str, event_type: str) -> bool:
-        if self._stop_pending:
+        if self._stop_pending or event_type != "down":
             return False
-
-        if event_type != "down":
-            return False
-
         if key_name == "x":
             return any(shift_key in self._pressed_keys for shift_key in SHIFT_KEY_NAMES)
-
         if key_name in SHIFT_KEY_NAMES:
             return "x" in self._pressed_keys
-
         return False
 
     @staticmethod
@@ -456,10 +591,10 @@ class RecordingService(QObject):
         if bounds is None or event.screen_x is None or event.screen_y is None:
             return [self._build_move_to_node(event)]
 
-        left, top, width, height = bounds
         if self._point_in_region(event.screen_x, event.screen_y, bounds):
             return []
 
+        left, top, width, height = bounds
         center_x = left + width // 2
         center_y = top + height // 2
         return [self._build_move_rel_node(event.screen_x - center_x, event.screen_y - center_y)]
@@ -479,11 +614,10 @@ class RecordingService(QObject):
 
         self_mark = f"rec_wait_{counter:03d}"
         next_mark = f"{self_mark}_done"
-        trigger = BranchTrigger.EXIST if mark.action == VisualMarkAction.WAIT_EXIST else BranchTrigger.NOT_EXIST
         node.wait_value = VISUAL_MARK_WAIT_SECONDS.get(mark.kind, "0.3")
         node.jump_mark = self_mark
         node.branch = BranchConfig(
-            trigger=trigger,
+            trigger=BranchTrigger.EXIST if mark.action == VisualMarkAction.WAIT_EXIST else BranchTrigger.NOT_EXIST,
             mode=BranchMode.JUMP_PAIR,
             primary_target=next_mark,
             secondary_target=self_mark,
@@ -540,7 +674,7 @@ class RecordingService(QObject):
     def _normalize_mouse_button(button: object) -> str:
         return str(button or "").strip().lower()
 
-    def _extract_mouse_position(self, event) -> tuple[int, int] | None:
+    def _extract_mouse_position(self, event: object) -> tuple[int, int] | None:
         x = getattr(event, "x", None)
         y = getattr(event, "y", None)
         try:
@@ -550,10 +684,9 @@ class RecordingService(QObject):
 
         if self._mouse_module is None:
             return None
-
         try:
-            x, y = self._mouse_module.get_position()
-            return int(x), int(y)
+            mouse_x, mouse_y = self._mouse_module.get_position()
+            return int(mouse_x), int(mouse_y)
         except Exception:
             return None
 
@@ -581,8 +714,7 @@ class RecordingService(QObject):
         left, top, right, bottom = rect
         width = right - left
         height = bottom - top
-        screen_size = self._get_screen_size()
-        is_fullscreen = screen_size == (width, height)
+        is_fullscreen = self._get_screen_size() == (width, height)
         if not is_fullscreen:
             left += 8
             top += 8
@@ -611,8 +743,7 @@ class RecordingService(QObject):
         rounded = round(seconds, 3)
         if rounded <= 0:
             return ""
-        text = f"{rounded:.3f}".rstrip("0").rstrip(".")
-        return text or ""
+        return f"{rounded:.3f}".rstrip("0").rstrip(".")
 
     @staticmethod
     def _get_window_rect(hwnd: int) -> tuple[int, int, int, int] | None:
@@ -620,7 +751,6 @@ class RecordingService(QObject):
             import win32gui
         except ModuleNotFoundError:
             return None
-
         try:
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
         except Exception:
@@ -661,7 +791,7 @@ class RecordingService(QObject):
 
         candidates: list[tuple[int, int]] = []
 
-        def enum_child_proc(hwnd, _):
+        def enum_child_proc(hwnd: int, _context: object) -> bool:
             try:
                 if not win32gui.IsWindowVisible(hwnd) or not win32gui.IsWindowEnabled(hwnd):
                     return True
@@ -702,12 +832,12 @@ def list_visible_windows() -> list[VisibleWindowInfo]:
 
     windows: list[VisibleWindowInfo] = []
 
-    def callback(hwnd, _):
+    def callback(hwnd: int, _context: object) -> bool:
         try:
             if not win32gui.IsWindowVisible(hwnd):
                 return True
             title = win32gui.GetWindowText(hwnd) or ""
-            if title == "":
+            if not title:
                 return True
             class_name = win32gui.GetClassName(hwnd) or ""
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
@@ -732,3 +862,121 @@ def list_visible_windows() -> list[VisibleWindowInfo]:
     win32gui.EnumWindows(callback, None)
     windows.sort(key=lambda item: item.title.lower())
     return windows
+
+
+def build_recording_review_rows(nodes: list[OperationNode]) -> list[RecordingReviewRow]:
+    rows: list[RecordingReviewRow] = []
+    for index, node in enumerate(nodes):
+        previous = nodes[index - 1] if index > 0 else None
+        previous_previous = nodes[index - 2] if index > 1 else None
+        rows.append(_build_recording_review_row(node, previous, previous_previous))
+    return rows
+
+
+def build_recording_summary(nodes: list[OperationNode]) -> RecordingSummary:
+    visual_operations = {OperationType.OCR.value, OperationType.PIC.value}
+    visual_count = sum(1 for node in nodes if node.operation in visual_operations)
+    wait_count = sum(1 for node in nodes if node.operation in visual_operations and node.branch.is_enabled)
+    locator_count = sum(1 for node in nodes if node.operation in visual_operations and not node.branch.is_enabled)
+    return RecordingSummary(
+        total=len(nodes),
+        visual_count=visual_count,
+        wait_count=wait_count,
+        locator_count=locator_count,
+        input_count=len(nodes) - visual_count,
+    )
+
+
+def _build_recording_review_row(
+    node: OperationNode,
+    previous: OperationNode | None,
+    previous_previous: OperationNode | None,
+) -> RecordingReviewRow:
+    if node.operation in {OperationType.OCR.value, OperationType.PIC.value}:
+        return _build_visual_review_row(node)
+
+    if node.operation == OperationType.MOVE_REL.value and _is_locator_node(previous):
+        return _build_keyboard_mouse_review_row(node, "定位偏移", "相对定位偏移")
+
+    if node.operation == OperationType.CLICK.value and _is_locator_node(previous):
+        return _build_keyboard_mouse_review_row(node, "点击定位目标", "丢弃录制坐标")
+
+    if (
+        node.operation == OperationType.CLICK.value
+        and previous
+        and previous.operation == OperationType.MOVE_REL.value
+        and _is_locator_node(previous_previous)
+    ):
+        return _build_keyboard_mouse_review_row(node, "点击偏移位置", "相对定位偏移后点击")
+
+    if node.operation == OperationType.MOVE_TO.value:
+        return _build_keyboard_mouse_review_row(node, "移动到录制坐标", "保留绝对坐标")
+
+    if node.operation == OperationType.MOVE_REL.value:
+        return _build_keyboard_mouse_review_row(node, "相对移动", "保留相对偏移")
+
+    if node.operation == OperationType.CLICK.value:
+        return _build_keyboard_mouse_review_row(node, "鼠标点击", "使用当前鼠标位置")
+
+    if node.operation in {OperationType.MOUSE_DOWN.value, OperationType.MOUSE_UP.value}:
+        return _build_keyboard_mouse_review_row(node, "鼠标按下/松开", "使用当前鼠标位置")
+
+    if node.operation in {
+        OperationType.PRESS.value,
+        OperationType.KEY_DOWN.value,
+        OperationType.KEY_UP.value,
+        OperationType.WRITE.value,
+    }:
+        return _build_keyboard_mouse_review_row(node, "键盘输入", "按录制键盘事件执行")
+
+    return _build_keyboard_mouse_review_row(node, "生成节点", "")
+
+
+def _build_visual_review_row(node: OperationNode) -> RecordingReviewRow:
+    target = node.search_target or "(未设置)"
+    kind = "OCR" if node.operation == OperationType.OCR.value else "PIC"
+    if node.branch.is_enabled:
+        if node.branch.trigger is BranchTrigger.EXIST:
+            semantic = "等待出现（不移动）"
+        elif node.branch.trigger is BranchTrigger.NOT_EXIST:
+            semantic = "等待消失（不移动）"
+        else:
+            semantic = "等待条件（不移动）"
+        strategy = f"{node.branch.trigger.value} -> {node.branch.primary_target}; 否则 {node.branch.secondary_target}"
+    else:
+        semantic = "定位目标（移动到匹配）"
+        strategy = "后续点击在区域内则丢弃坐标；区域外则转相对偏移"
+
+    return RecordingReviewRow(
+        source=f"{kind} 标记",
+        semantic=semantic,
+        node_text=node.operation,
+        target_text=target,
+        region_text=node.region_text or "(未设置)",
+        strategy_text=strategy,
+        wait_text=node.wait_value,
+        note_text=node.note,
+    )
+
+
+def _build_keyboard_mouse_review_row(node: OperationNode, semantic: str, strategy: str) -> RecordingReviewRow:
+    return RecordingReviewRow(
+        source="键鼠事件",
+        semantic=semantic,
+        node_text=node.operation,
+        target_text=node.param_text or "",
+        region_text=_format_recorded_coordinate(node),
+        strategy_text=strategy,
+        wait_text=node.wait_value,
+        note_text=node.note,
+    )
+
+
+def _format_recorded_coordinate(node: OperationNode) -> str:
+    if node.operation in {OperationType.MOVE_TO.value, OperationType.MOVE_REL.value}:
+        return node.param_text
+    return ""
+
+
+def _is_locator_node(node: OperationNode | None) -> bool:
+    return bool(node and node.operation in {OperationType.OCR.value, OperationType.PIC.value} and not node.branch.is_enabled)

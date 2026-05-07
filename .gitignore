@@ -4,3 +4,11 @@ screenshot
 record
 config/*/
 ocr_model/*/
+.agents
+.codestable
+csv_editor/webui/node_modules/
+csv_editor/webui/dist/
+csv_editor/webui/.vite/
+csv_editor/webui/*.tsbuildinfo
+csv_editor/webui/vite.config.js
+csv_editor/webui/vite.config.d.ts
