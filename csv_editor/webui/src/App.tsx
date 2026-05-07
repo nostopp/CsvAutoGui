@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { bridge } from "./bridge";
 import { buildCsvPreview } from "./csvPreview";
@@ -282,6 +282,44 @@ function summarizeBranch(node: OperationNodeDTO | null): string {
   return details || "No branch configured.";
 }
 
+function compactLocator(node: OperationNodeDTO): string {
+  return node.search_target || node.param_text || "Unset target";
+}
+
+function compactRegion(node: OperationNodeDTO): string {
+  return node.region_text || "-";
+}
+
+function compactTiming(node: OperationNodeDTO): string {
+  const wait = node.wait_value || "-";
+  const retry = node.retry_value || "-";
+  const move = node.move_time || "-";
+  return `W ${wait} · R ${retry} · M ${move}`;
+}
+
+function compactBranch(node: OperationNodeDTO): string {
+  if (node.branch.mode === "none" && node.branch.trigger === "none") {
+    return "none";
+  }
+  const targets = [node.branch.primary_target, node.branch.secondary_target].filter(Boolean).join(" / ");
+  return [node.branch.trigger !== "none" ? node.branch.trigger : "", node.branch.mode !== "none" ? node.branch.mode : "", targets]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function compactSummary(node: OperationNodeDTO): string {
+  if (node.note) {
+    return node.note;
+  }
+  if (node.jump_mark) {
+    return `mark ${node.jump_mark}`;
+  }
+  if (node.confidence_text) {
+    return `confidence ${node.confidence_text}`;
+  }
+  return summarizeNode(node);
+}
+
 function parseConfidence(value: string): number {
   const numeric = Number.parseFloat(value);
   if (!Number.isFinite(numeric)) {
@@ -308,6 +346,64 @@ const EMPTY_OCR_CANDIDATE_DIALOG: OcrCandidateDialogState = {
   regionText: "",
   candidates: [],
   selected: "",
+};
+
+const COMMAND_GROUP_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  flexWrap: "wrap",
+};
+
+const COMMAND_LABEL_STYLE: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: "#627277",
+};
+
+const COMPACT_BUTTON_STYLE: CSSProperties = {
+  minHeight: 30,
+  padding: "6px 10px",
+  borderRadius: 10,
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const TABLE_HEADER_CELL_STYLE: CSSProperties = {
+  padding: "8px 10px",
+  fontSize: 11,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  whiteSpace: "nowrap",
+};
+
+const TABLE_BODY_CELL_STYLE: CSSProperties = {
+  padding: "6px 8px",
+  fontSize: 12,
+  lineHeight: 1.2,
+};
+
+const SECONDARY_TEXT_STYLE: CSSProperties = {
+  fontSize: 11,
+  color: "#627277",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const TABLE_SINGLE_LINE_STYLE: CSSProperties = {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  display: "block",
+};
+
+const DENSE_SECTION_STYLE: CSSProperties = {
+  padding: "12px 13px",
+  gap: 10,
+  borderRadius: 14,
 };
 
 export default function App() {
@@ -1430,96 +1526,152 @@ export default function App() {
   const recordingSessionActive = Boolean(
     recordingDialog.session?.close_protected ?? (recordingDialog.session && ["recording", "paused"].includes(recordingDialog.session.status)),
   );
+  const currentFlowSummary = currentFlow
+    ? `${currentFlow.filename} · ${visibleNodes.length}/${currentFlow.nodes.length} rows visible`
+    : "Select a flow to start editing.";
+  const flowOperationSummary = quickFilters.length
+    ? quickFilters.map((filter) => `${filter.operation.toUpperCase()} ${filter.count}`).join(" · ")
+    : "No operation clusters in the current flow.";
 
   return (
     <div className="app-shell">
-      <div className="editor-frame">
-        <aside className="nav-rail" aria-hidden="true">
-          <div className="rail-brand">C</div>
-          <div className="rail-stack">
-            <span className="rail-marker active">F</span>
-            <span className="rail-marker">N</span>
-            <span className="rail-marker">I</span>
-          </div>
-          <div className="rail-spacer" />
-          <span className="rail-marker">?</span>
-        </aside>
+      <div className="editor-frame" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
+        <div className="stage-shell" style={{ gap: 10 }}>
+          <header className="topbar" style={{ padding: density === "compact" ? "10px 12px" : undefined, borderRadius: 16, gap: 8 }}>
+            <div className="topbar-copy" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <strong style={{ fontSize: 15, fontWeight: 800 }}>{bootstrap?.app_name ?? "CsvAutoGui Editor"}</strong>
+              <span className="status-pill tone-idle" style={{ minHeight: 28, padding: "4px 10px", fontSize: 12 }}>
+                {configLabel}
+              </span>
+              <span style={COMMAND_LABEL_STYLE}>
+                {document ? `${document.flows.length} flows · ${totalNodes} nodes` : "Open a config directory to begin"}
+              </span>
+            </div>
 
-        <div className="stage-shell">
-          <header className="topbar">
-            <div className="topbar-copy">
-              <p className="eyebrow">Web UI concept / route 2</p>
-              <h1>{bootstrap?.app_name ?? "CsvAutoGui Editor"}</h1>
-              <p className="subtitle">
-                {document ? `Current config: ${document.root_path}` : "Python backend + WebView frontend"}
-              </p>
+            <div className="topbar-actions" style={{ gap: 10 }}>
+              <div style={COMMAND_GROUP_STYLE}>
+                <span style={COMMAND_LABEL_STYLE}>File</span>
+                <button className="ghost-button accent-teal" style={COMPACT_BUTTON_STYLE} onClick={() => void handleChooseDirectory()}>
+                  Open
+                </button>
+                <button
+                  className="soft-button accent-teal"
+                  style={COMPACT_BUTTON_STYLE}
+                  onClick={() => void handleSave()}
+                  disabled={!document || busy.save}
+                >
+                  Save
+                </button>
+              </div>
+
+              <div style={COMMAND_GROUP_STYLE}>
+                <span style={COMMAND_LABEL_STYLE}>Review</span>
+                <button
+                  className="ghost-button accent-amber"
+                  style={COMPACT_BUTTON_STYLE}
+                  onClick={() => void handleValidate()}
+                  disabled={!document || busy.validate}
+                >
+                  Validate
+                </button>
+                <button
+                  className="ghost-button"
+                  style={COMPACT_BUTTON_STYLE}
+                  onClick={() => void openUnusedAssetsWorkspace()}
+                  disabled={!document}
+                >
+                  Assets
+                </button>
+                <button
+                  className="ghost-button"
+                  style={COMPACT_BUTTON_STYLE}
+                  onClick={() => setActiveToolWindow("csv_preview")}
+                  disabled={!document}
+                >
+                  Preview
+                </button>
+              </div>
+
+              <div style={COMMAND_GROUP_STYLE}>
+                <span style={COMMAND_LABEL_STYLE}>Tools</span>
+                <button
+                  className="ghost-button accent-amber"
+                  style={COMPACT_BUTTON_STYLE}
+                  onClick={() => void openRecordingDialog()}
+                  disabled={!document}
+                >
+                  Record
+                </button>
+                <button
+                  className="ghost-button"
+                  style={COMPACT_BUTTON_STYLE}
+                  onClick={() => setDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
+                >
+                  {density === "compact" ? "Dense" : "Comfort"}
+                </button>
+              </div>
             </div>
-            <div className="topbar-actions">
-              <button className="ghost-button accent-teal" onClick={() => void handleChooseDirectory()}>
-                Open Config
-              </button>
-              <button className="ghost-button" onClick={() => setDensity((current) => (current === "compact" ? "comfortable" : "compact"))}>
-                Density: {density === "compact" ? "Compact" : "Comfort"}
-              </button>
-              <button className="ghost-button" onClick={() => setActiveToolWindow("csv_preview")} disabled={!document}>
-                CSV Preview
-              </button>
-              <button className="ghost-button" onClick={() => void openUnusedAssetsWorkspace()} disabled={!document}>
-                Unused Assets
-              </button>
-              <button className="ghost-button accent-amber" onClick={() => void openRecordingDialog()} disabled={!document}>
-                Record
-              </button>
-              <button className="ghost-button accent-amber" onClick={() => void handleValidate()} disabled={!document || busy.validate}>
-                Validate
-              </button>
-              <button className="soft-button accent-teal" onClick={() => void handleSave()} disabled={!document || busy.save}>
-                Save
-              </button>
-            </div>
-            <div className="status-cluster">
-              <span className={`status-pill tone-${notice.tone}`}>{notice.text}</span>
-              <span className={`status-pill ${dirty ? "tone-warning" : "tone-success"}`}>
-                {dirty ? "Unsaved changes" : "Saved"}
+
+            <div className="status-cluster" style={{ gridColumn: "auto", justifyContent: "flex-end", gap: 6 }}>
+              <span className={`status-pill tone-${notice.tone}`} style={{ minHeight: 28, padding: "4px 10px", fontSize: 12 }}>
+                {notice.text}
+              </span>
+              <span
+                className={`status-pill ${dirty ? "tone-warning" : "tone-success"}`}
+                style={{ minHeight: 28, padding: "4px 10px", fontSize: 12 }}
+              >
+                {dirty ? "Unsaved" : "Saved"}
               </span>
             </div>
           </header>
 
           <section className={`workspace-grid density-${density} ${leftCollapsed ? "left-collapsed" : ""} ${rightCollapsed ? "right-collapsed" : ""}`}>
-            <aside className={`panel left-column ${leftCollapsed ? "collapsed-panel" : ""}`}>
-              <div className="panel-header stacked">
+            <aside className={`panel left-column ${leftCollapsed ? "collapsed-panel" : ""}`} style={{ padding: density === "compact" ? "12px" : undefined, gap: 10 }}>
+              <div className="panel-header compact">
                 <div>
                   <h2>Flows</h2>
-                  <p>Browse automation branches and keep an eye on validation health.</p>
+                  <p>Navigation and health signals.</p>
                 </div>
                 <div className="panel-header-actions">
-                  <span className="panel-count">{document?.flows.length ?? 0}</span>
+                  <span className="panel-count" style={{ minWidth: 34, minHeight: 34, borderRadius: 12 }}>
+                    {document?.flows.length ?? 0}
+                  </span>
                   <button className="icon-button" onClick={() => setLeftCollapsed((current) => !current)}>
-                    {leftCollapsed ? "Expand" : "Collapse"}
+                    {leftCollapsed ? "Show" : "Hide"}
                   </button>
                 </div>
               </div>
 
               {!leftCollapsed && (
-                <>
-                  <div className="search-field">
-                    <input
-                      value={flowQuery}
-                      onChange={(event) => setFlowQuery(event.target.value)}
-                      placeholder="Search flow or node..."
-                    />
+                <div style={{ display: "grid", gap: 10, minHeight: 0, flex: 1 }}>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div className="search-field">
+                      <input
+                        value={flowQuery}
+                        onChange={(event) => setFlowQuery(event.target.value)}
+                        placeholder="Search flows or node text..."
+                        style={{ padding: "8px 10px" }}
+                      />
+                    </div>
+
+                    <span style={COMMAND_LABEL_STYLE}>{`${visibleFlows.length} visible · ${issues.length} issues · ${unusedImages.length} unused`}</span>
                   </div>
 
-                  <div className="flow-list">
+                  <div className="flow-list" style={{ gap: 8 }}>
                     {visibleFlows.map((flow) => (
                       <button
                         key={flow.filename}
                         className={flow.filename === document?.state.selected_flow ? "flow-item active" : "flow-item"}
                         onClick={() => selectFlow(flow.filename)}
+                        style={{ padding: density === "compact" ? "10px 12px" : undefined, borderRadius: 14, gap: 10 }}
                       >
-                        <div className="flow-text">
-                          <strong className="flow-name">{flow.filename}</strong>
-                          <span className="flow-meta">{`${flow.nodes.length} nodes · ${describeFlow(flow)}`}</span>
+                        <div className="flow-text" style={{ gap: 4, minWidth: 0 }}>
+                          <strong className="flow-name" style={{ fontSize: 14 }}>
+                            {flow.filename}
+                          </strong>
+                          <span className="flow-meta" title={describeFlow(flow)}>
+                            {`${flow.nodes.length} nodes · ${describeFlow(flow)}`}
+                          </span>
                         </div>
                         <strong className="flow-count">{flow.nodes.length}</strong>
                       </button>
@@ -1527,42 +1679,47 @@ export default function App() {
                     {!visibleFlows.length && <p className="empty">No flows match the current search.</p>}
                   </div>
 
-                  <section className="quality-panel">
-                    <div className="panel-header compact stacked">
+                  <section className="quality-panel" style={{ gap: 8 }}>
+                    <div className="panel-header compact">
                       <div>
-                        <h3>Validation</h3>
-                        <p>Run checks before save and review detached assets.</p>
+                        <h3>Health Dock</h3>
+                        <p>{issues.length ? `${issueSummary.error} errors · ${issueSummary.warning} warnings` : "Validation and asset cleanup."}</p>
                       </div>
-                      <div className="toolbar-actions">
-                        <button className="ghost-button" onClick={() => void handleValidate()} disabled={!document || busy.validate}>
+                      <div className="toolbar-actions" style={{ gap: 6 }}>
+                        <button
+                          className="ghost-button"
+                          style={COMPACT_BUTTON_STYLE}
+                          onClick={() => void handleValidate()}
+                          disabled={!document || busy.validate}
+                        >
                           Validate
                         </button>
-                        <button className="ghost-button" onClick={() => void openUnusedAssetsWorkspace()} disabled={!document || busy.scan}>
+                        <button
+                          className="ghost-button"
+                          style={COMPACT_BUTTON_STYLE}
+                          onClick={() => void openUnusedAssetsWorkspace()}
+                          disabled={!document || busy.scan}
+                        >
                           Assets
                         </button>
                       </div>
                     </div>
 
-                    <div className="quality-summary">
-                      <div className="quality-card quality-warning">
-                        <strong>{issueSummary.error + issueSummary.warning || 0} findings</strong>
-                        <span>
-                          {issues.length
-                            ? `${issueSummary.error} errors · ${issueSummary.warning} warnings`
-                            : "No validation report yet"}
-                        </span>
-                      </div>
-                      <div className="quality-card quality-success">
-                        <strong>{unusedImages.length} unused assets</strong>
-                        <span>{unusedImages.length ? "Workspace ready for cleanup." : "Asset scan has not been run."}</span>
-                      </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <span className="status-pill tone-warning" style={{ minHeight: 24, padding: "2px 8px", fontSize: 11 }}>
+                        {issueSummary.error + issueSummary.warning || 0} findings
+                      </span>
+                      <span className="status-pill tone-success" style={{ minHeight: 24, padding: "2px 8px", fontSize: 11 }}>
+                        {unusedImages.length} unused assets
+                      </span>
                     </div>
 
-                    <div className="issues-list">
-                      {issues.map((issue, index) => (
+                    <div className="issues-list" style={{ gap: 6, maxHeight: 120 }}>
+                      {issues.slice(0, 3).map((issue, index) => (
                         <button
                           key={`${issue.flow_name}-${issue.node_id}-${index}`}
                           className={issueTone(issue.severity)}
+                          style={{ padding: "10px 12px", borderRadius: 14 }}
                           onClick={() => {
                             selectFlow(issue.flow_name);
                             if (issue.node_id) {
@@ -1574,100 +1731,141 @@ export default function App() {
                           <span>{issue.message}</span>
                         </button>
                       ))}
+                      {issues.length > 3 && <p className="empty">{`+${issues.length - 3} more findings`}</p>}
                       {!issues.length && <p className="empty">Run validation to populate issues.</p>}
                     </div>
                   </section>
-                </>
+                </div>
               )}
             </aside>
 
-            <main className="panel center-column">
-              <div className="workbench-top">
-                <div className="panel-header compact">
+            <main className="panel center-column" style={{ padding: density === "compact" ? "12px" : undefined, gap: 10 }}>
+              <div className="workbench-top" style={{ gap: 8 }}>
+                <div className="panel-header compact" style={{ alignItems: "center" }}>
                   <div>
-                    <h2>Node List</h2>
-                    <p>{currentFlow ? `${currentFlow.filename} · ${visibleNodes.length} visible nodes` : "Select a flow to start editing."}</p>
+                    <h2>Node Table</h2>
+                    <p>{currentFlowSummary}</p>
                   </div>
-                  <div className="view-switch">
-                    <span className="view-chip active">Table</span>
-                    <span className="view-chip muted">{density === "compact" ? "Dense" : "Comfort"}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span className="status-pill tone-idle" style={{ minHeight: 26, padding: "3px 9px", fontSize: 11 }}>
+                      {selectedCount} selected
+                    </span>
+                    <span className="status-pill tone-idle" style={{ minHeight: 26, padding: "3px 9px", fontSize: 11 }}>
+                      {visibleNodes.length} visible
+                    </span>
+                    <span className="status-pill tone-idle" style={{ minHeight: 26, padding: "3px 9px", fontSize: 11 }}>
+                      {density === "compact" ? "Dense view" : "Comfort view"}
+                    </span>
                   </div>
                 </div>
 
-                <div className="toolbar-actions wide">
-                  <button onClick={handleUndo} disabled={!canUndoEditorHistory(history)}>
-                    Undo
-                  </button>
-                  <button onClick={handleRedo} disabled={!canRedoEditorHistory(history)}>
-                    Redo
-                  </button>
-                  <button onClick={addNode} disabled={!document}>
-                    Add
-                  </button>
-                  <button onClick={deleteNodes} disabled={!document}>
-                    Delete
-                  </button>
-                  <button onClick={() => moveSelection(-1)} disabled={!selectedNodeIds.length}>
-                    Up
-                  </button>
-                  <button onClick={() => moveSelection(1)} disabled={!selectedNodeIds.length}>
-                    Down
-                  </button>
-                  <button onClick={() => void copySelection()} disabled={!selectedNodeIds.length}>
-                    Copy
-                  </button>
-                  <button onClick={() => void pasteSelection()} disabled={!document}>
-                    Paste
-                  </button>
-                  <button onClick={() => void openImportDialog()} disabled={!document}>
-                    Import
-                  </button>
-                  <button onClick={() => setActiveToolWindow("csv_preview")} disabled={!currentFlow}>
-                    Preview
-                  </button>
-                  <button onClick={() => void openRecordingDialog()} disabled={!document}>
-                    Record
-                  </button>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div
+                    className="toolbar-actions"
+                    style={{
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: 8,
+                      padding: "8px 10px",
+                      border: "1px solid #edf1ef",
+                      borderRadius: 14,
+                      background: "#f8faf7",
+                    }}
+                  >
+                    <div style={COMMAND_GROUP_STYLE}>
+                      <span style={COMMAND_LABEL_STYLE}>History</span>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={handleUndo} disabled={!canUndoEditorHistory(history)}>
+                        Undo
+                      </button>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={handleRedo} disabled={!canRedoEditorHistory(history)}>
+                        Redo
+                      </button>
+                    </div>
+
+                    <div style={COMMAND_GROUP_STYLE}>
+                      <span style={COMMAND_LABEL_STYLE}>Rows</span>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={addNode} disabled={!document}>
+                        Add
+                      </button>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={deleteNodes} disabled={!document}>
+                        Delete
+                      </button>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={() => moveSelection(-1)} disabled={!selectedNodeIds.length}>
+                        Up
+                      </button>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={() => moveSelection(1)} disabled={!selectedNodeIds.length}>
+                        Down
+                      </button>
+                    </div>
+
+                    <div style={COMMAND_GROUP_STYLE}>
+                      <span style={COMMAND_LABEL_STYLE}>Clipboard</span>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={() => void copySelection()} disabled={!selectedNodeIds.length}>
+                        Copy
+                      </button>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={() => void pasteSelection()} disabled={!document}>
+                        Paste
+                      </button>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={() => void openImportDialog()} disabled={!document}>
+                        Import
+                      </button>
+                    </div>
+
+                    <div style={COMMAND_GROUP_STYLE}>
+                      <span style={COMMAND_LABEL_STYLE}>Tools</span>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={() => setActiveToolWindow("csv_preview")} disabled={!currentFlow}>
+                        Preview
+                      </button>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={() => void openRecordingDialog()} disabled={!document}>
+                        Record
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="search-block" style={{ gap: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <div className="quick-filters" style={{ gap: 6 }}>
+                        {quickFilters.map((filter) => (
+                          <button
+                            key={filter.operation}
+                            className={searchQuery.trim().toLowerCase() === filter.operation ? "quick-filter active" : "quick-filter"}
+                            style={{ minHeight: 28, padding: "4px 9px", borderRadius: 10, fontSize: 11, fontWeight: 700 }}
+                            onClick={() =>
+                              setSearchQuery((current) => (current.trim().toLowerCase() === filter.operation ? "" : filter.operation))
+                            }
+                          >
+                            {filter.operation.toUpperCase()} · {filter.count}
+                          </button>
+                        ))}
+                      </div>
+                      <span style={COMMAND_LABEL_STYLE}>{flowOperationSummary}</span>
+                    </div>
+
+                    <div className="search-row">
+                      <input
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder="Filter node summaries, targets, branch marks, or notes"
+                        style={{ padding: "8px 10px" }}
+                      />
+                      <span className="search-count">{`${selectedCount} selected · ${issues.length} issues`}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="search-block">
-                <div className="quick-filters">
-                  {quickFilters.map((filter) => (
-                    <button
-                      key={filter.operation}
-                      className={searchQuery.trim().toLowerCase() === filter.operation ? "quick-filter active" : "quick-filter"}
-                      onClick={() =>
-                        setSearchQuery((current) => (current.trim().toLowerCase() === filter.operation ? "" : filter.operation))
-                      }
-                    >
-                      {filter.operation.toUpperCase()} · {filter.count}
-                    </button>
-                  ))}
-                </div>
-                <div className="search-row">
-                  <input
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="Quick filter: OCR / PIC / Click / Move / Branch / Wait"
-                  />
-                  <span className="search-count">{selectedCount} selected</span>
-                </div>
-              </div>
-
-              <div className="node-table-wrap">
-                <table className="node-table">
+              <div className="node-table-wrap" style={{ borderRadius: 14 }}>
+                <table className="node-table" style={{ tableLayout: "fixed" }}>
                   <thead>
                     <tr>
-                      <th></th>
-                      <th>#</th>
-                      <th>Type</th>
-                      <th>Param</th>
-                      <th>Target</th>
-                      <th>Region / Mark</th>
-                      <th>Timing</th>
-                      <th>Branch</th>
-                      <th>Note</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 40 }}></th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 54 }}>#</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 88 }}>Op</th>
+                      <th style={TABLE_HEADER_CELL_STYLE}>Locator</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "17%" }}>Region</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "16%" }}>Timing</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "16%" }}>Branch</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "21%" }}>Summary</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1676,8 +1874,9 @@ export default function App() {
                         key={node.node_id}
                         className={node.node_id === document?.state.selected_node_id ? "active-row" : ""}
                         onClick={() => activateNode(node.node_id)}
+                        title={summarizeNode(node)}
                       >
-                        <td className="checkbox-cell">
+                        <td className="checkbox-cell" style={{ ...TABLE_BODY_CELL_STYLE, width: 40 }}>
                           <input
                             type="checkbox"
                             checked={selectedNodeIds.includes(node.node_id)}
@@ -1685,44 +1884,41 @@ export default function App() {
                             onClick={(event) => event.stopPropagation()}
                           />
                         </td>
-                        <td>
-                          <span className="index-pill">{node.index}</span>
+                        <td style={TABLE_BODY_CELL_STYLE}>
+                          <span className="index-pill" style={{ minWidth: 28, height: 24, fontSize: 11 }}>
+                            {node.index}
+                          </span>
                         </td>
-                        <td>
-                          <span className="op-pill" data-operation={node.operation}>
+                        <td style={TABLE_BODY_CELL_STYLE}>
+                          <span className="op-pill" data-operation={node.operation} style={{ minHeight: 24, fontSize: 11 }}>
                             {node.operation.toUpperCase()}
                           </span>
                         </td>
-                        <td className="node-cell compact-cell">
-                          <strong>{node.param_text || "-"}</strong>
-                          <span>{node.move_time || "-"}</span>
+                        <td className="node-cell" style={TABLE_BODY_CELL_STYLE} title={`${compactLocator(node)} | ${node.param_text || "No param text"}`}>
+                          <span style={TABLE_SINGLE_LINE_STYLE}>{compactLocator(node)}</span>
                         </td>
-                        <td className="node-cell">
-                          <strong>{node.search_target || node.param_text || "Unset target"}</strong>
-                          <span>{node.confidence_text || "No confidence"}</span>
+                        <td className="node-cell compact-cell" style={TABLE_BODY_CELL_STYLE} title={compactRegion(node)}>
+                          <span style={TABLE_SINGLE_LINE_STYLE}>{compactRegion(node)}</span>
                         </td>
-                        <td className="node-cell compact-cell">
-                          <strong>{node.region_text || "-"}</strong>
-                          <span>{node.jump_mark || "No jump mark"}</span>
+                        <td className="node-cell compact-cell" style={TABLE_BODY_CELL_STYLE} title={compactTiming(node)}>
+                          <span style={TABLE_SINGLE_LINE_STYLE}>{compactTiming(node)}</span>
                         </td>
-                        <td className="node-cell compact-cell">
-                          <strong>{node.wait_value || "-"}</strong>
-                          <span>{node.retry_value ? `retry ${node.retry_value}` : "No retry"}</span>
+                        <td className="node-cell compact-cell" style={TABLE_BODY_CELL_STYLE} title={compactBranch(node)}>
+                          <span style={TABLE_SINGLE_LINE_STYLE}>{compactBranch(node)}</span>
                         </td>
-                        <td className="node-cell compact-cell">
-                          <strong>{node.branch.mode !== "none" ? node.branch.mode : "none"}</strong>
-                          <span>{node.branch.trigger !== "none" ? node.branch.trigger : "no trigger"}</span>
-                        </td>
-                        <td className="node-cell summary-cell">
-                          <strong>{summarizeNode(node)}</strong>
-                          <span>{node.note || "No note"}</span>
+                        <td
+                          className="node-cell summary-cell"
+                          style={TABLE_BODY_CELL_STYLE}
+                          title={`${summarizeNode(node)} | ${compactSummary(node)}`}
+                        >
+                          <span style={TABLE_SINGLE_LINE_STYLE}>{`${summarizeNode(node)} · ${compactSummary(node)}`}</span>
                         </td>
                       </tr>
                     ))}
                     {!visibleNodes.length && (
                       <tr>
-                        <td colSpan={9} className="empty">
-                          Open a config directory to start editing.
+                        <td colSpan={8} className="empty">
+                          {document ? "No nodes match the current filter." : "Open a config directory to start editing."}
                         </td>
                       </tr>
                     )}
@@ -1731,40 +1927,78 @@ export default function App() {
               </div>
 
               <div className="workbench-footer">
-                <span>{`${visibleNodes.length} visible nodes · ${totalNodes} total nodes`}</span>
+                <span>{`${visibleNodes.length} visible rows · ${totalNodes} total nodes`}</span>
                 <span>{`${selectedCount} selected · ${issues.length} issues · ${unusedImages.length} unused`}</span>
               </div>
             </main>
 
-            <aside className={`panel right-column ${rightCollapsed ? "collapsed-panel" : ""}`}>
-              <div className="panel-header stacked compact">
+            <aside className={`panel right-column ${rightCollapsed ? "collapsed-panel" : ""}`} style={{ padding: density === "compact" ? "12px" : undefined, gap: 10 }}>
+              <div className="panel-header compact" style={{ alignItems: "center" }}>
                 <div>
                   <h2>Inspector</h2>
-                  <p>Selected node details, timing parameters, and branch routing.</p>
+                  <p>Stable edit pane for the active row.</p>
                 </div>
                 <div className="panel-header-actions">
                   {activeNode ? (
-                    <span className="op-pill" data-operation={activeNode.operation}>
+                    <span className="op-pill" data-operation={activeNode.operation} style={{ minHeight: 24, fontSize: 11 }}>
                       {activeNode.operation.toUpperCase()}
                     </span>
                   ) : (
-                    <span className="panel-count">0</span>
+                    <span className="panel-count" style={{ minWidth: 34, minHeight: 34, borderRadius: 12 }}>
+                      0
+                    </span>
                   )}
                   <button className="icon-button" onClick={() => setRightCollapsed((current) => !current)}>
-                    {rightCollapsed ? "Expand" : "Collapse"}
+                    {rightCollapsed ? "Show" : "Hide"}
                   </button>
                 </div>
               </div>
+
               {!rightCollapsed && activeNode ? (
-                <div className="inspector">
-                  <div className="inspector-hero">
-                    <strong>{summarizeNode(activeNode)}</strong>
-                    <span>{`${activeNodeDetail} · ${summarizeBranch(activeNode)}`}</span>
+                <div className="inspector" style={{ gap: 10 }}>
+                  <div className="inspector-hero" style={{ ...DENSE_SECTION_STYLE, position: "sticky", top: 0, zIndex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                      <strong style={{ marginBottom: 0, fontSize: 15 }}>{summarizeNode(activeNode)}</strong>
+                      <span className="index-pill" style={{ minWidth: 28, height: 24, fontSize: 11 }}>
+                        {activeNode.index}
+                      </span>
+                    </div>
+                    <span title={activeNodeDetail}>{activeNodeDetail}</span>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                      <span className="status-pill tone-idle" style={{ minHeight: 24, padding: "2px 8px", fontSize: 11 }}>
+                        {activeNode.operation}
+                      </span>
+                      <span className="status-pill tone-idle" style={{ minHeight: 24, padding: "2px 8px", fontSize: 11 }}>
+                        {summarizeBranch(activeNode)}
+                      </span>
+                    </div>
                   </div>
 
-                  <section className="inspector-section">
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+                    <div className="metric-card" style={{ padding: "10px 12px", borderRadius: 14 }}>
+                      <div className="metric-header">
+                        <span>Confidence</span>
+                        <strong>{activeNode.confidence_text || "0.00"}</strong>
+                      </div>
+                      <div className="confidence-track">
+                        <span style={{ width: `${confidenceValue * 100}%` }} />
+                      </div>
+                    </div>
+                    <div className="metric-card" style={{ padding: "10px 12px", borderRadius: 14 }}>
+                      <div className="metric-header">
+                        <span>Flags</span>
+                        <strong>{activeNode.pic_range_random || activeNode.disable_grayscale ? "custom" : "default"}</strong>
+                      </div>
+                      <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+                        <span style={SECONDARY_TEXT_STYLE}>{activeNode.pic_range_random ? "random move on" : "random move off"}</span>
+                        <span style={SECONDARY_TEXT_STYLE}>{activeNode.disable_grayscale ? "grayscale disabled" : "grayscale enabled"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <section className="inspector-section" style={DENSE_SECTION_STYLE}>
                     <h3>Locator</h3>
-                    <div className="field-grid">
+                    <div className="field-grid" style={{ gap: 10 }}>
                       <label>
                         <span>Operation</span>
                         <input value={activeNode.operation} onChange={(event) => updateNodeField("operation", event.target.value)} />
@@ -1777,14 +2011,19 @@ export default function App() {
                         <span>Param</span>
                         <div className="inline-field">
                           <input value={activeNode.param_text} onChange={(event) => updateNodeField("param_text", event.target.value)} />
-                          <button onClick={() => void captureForNode("point")}>Pick</button>
+                          <button style={COMPACT_BUTTON_STYLE} onClick={() => void captureForNode("point")}>
+                            Pick
+                          </button>
                         </div>
                       </label>
                       <label className="wide-field">
                         <span>Region</span>
                         <div className="inline-field">
                           <input value={activeNode.region_text} onChange={(event) => updateNodeField("region_text", event.target.value)} />
-                          <button onClick={() => void captureForNode(activeNode.operation === "ocr" ? "ocr" : "pic")}>
+                          <button
+                            style={COMPACT_BUTTON_STYLE}
+                            onClick={() => void captureForNode(activeNode.operation === "ocr" ? "ocr" : "pic")}
+                          >
                             Capture
                           </button>
                         </div>
@@ -1797,20 +2036,11 @@ export default function App() {
                         />
                       </label>
                     </div>
-                    <div className="metric-card">
-                      <div className="metric-header">
-                        <span>Match confidence</span>
-                        <strong>{activeNode.confidence_text || "0.00"}</strong>
-                      </div>
-                      <div className="confidence-track">
-                        <span style={{ width: `${confidenceValue * 100}%` }} />
-                      </div>
-                    </div>
                   </section>
 
-                  <section className="inspector-section">
+                  <section className="inspector-section" style={DENSE_SECTION_STYLE}>
                     <h3>Timing</h3>
-                    <div className="field-grid">
+                    <div className="field-grid" style={{ gap: 10 }}>
                       <label>
                         <span>Wait</span>
                         <div className="split-field">
@@ -1836,9 +2066,9 @@ export default function App() {
                     </div>
                   </section>
 
-                  <section className="inspector-section">
+                  <section className="inspector-section" style={DENSE_SECTION_STYLE}>
                     <h3>Branch</h3>
-                    <div className="field-grid">
+                    <div className="field-grid" style={{ gap: 10 }}>
                       <label>
                         <span>Branch Trigger</span>
                         <select value={activeNode.branch.trigger} onChange={(event) => updateBranchField("trigger", event.target.value)}>
@@ -1872,7 +2102,7 @@ export default function App() {
                     </div>
                   </section>
 
-                  <section className="inspector-section">
+                  <section className="inspector-section" style={DENSE_SECTION_STYLE}>
                     <h3>Notes & Preview</h3>
                     <label className="checkbox-row">
                       <input
@@ -1892,9 +2122,13 @@ export default function App() {
                     </label>
                     <label>
                       <span>Note</span>
-                      <textarea value={activeNode.note} onChange={(event) => updateNodeField("note", event.target.value)} />
+                      <textarea
+                        value={activeNode.note}
+                        onChange={(event) => updateNodeField("note", event.target.value)}
+                        style={{ minHeight: 80 }}
+                      />
                     </label>
-                    <div className="preview-card">
+                    <div className="preview-card" style={{ padding: "12px 13px", borderRadius: 14 }}>
                       <div className="subpanel-head compact">
                         <div>
                           <h3>Image Preview</h3>
@@ -1906,14 +2140,24 @@ export default function App() {
                   </section>
                 </div>
               ) : !rightCollapsed ? (
-                <p className="empty">Select a node to edit its fields.</p>
+                <div
+                  style={{
+                    border: "1px dashed #d6dfdc",
+                    borderRadius: 14,
+                    padding: "14px 15px",
+                    background: "#fbfcf9",
+                    color: "#627277",
+                  }}
+                >
+                  Select a node to edit its fields.
+                </div>
               ) : (
                 <p className="empty">Inspector collapsed.</p>
               )}
             </aside>
           </section>
 
-          <footer className="status-bar">
+          <footer className="status-bar" style={{ padding: "10px 14px", borderRadius: 14, fontSize: 12 }}>
             <span>{`Current config: ${configLabel}`}</span>
             <span>{`${document?.flows.length ?? 0} flows · ${totalNodes} nodes`}</span>
             <span>{`${issues.length} issues · ${unusedImages.length} unused images`}</span>
