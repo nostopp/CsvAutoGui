@@ -3,6 +3,20 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { bridge } from "./bridge";
 import { buildCsvPreview } from "./csvPreview";
 import {
+  createNodeForOperation,
+  getAllowedHelpers,
+  getBranchOptions,
+  getBranchPrimaryLabel,
+  getBranchSecondaryLabel,
+  hasVisibleField,
+  getNodeRowView,
+  getOperationEntries,
+  getOperationMeta,
+  getParamEditorConfig,
+  getSearchTargetLabel,
+  normalizeNodeForOperation,
+} from "./editorSemantics";
+import {
   createEditorSelection,
   createEditorTransaction,
   nodeFieldMergeKey,
@@ -62,18 +76,20 @@ type RecordingDialogState = {
     locator_count: number;
     input_count: number;
   } | null;
-  markKind: "pic" | "ocr";
-  markAction: "locate" | "wait_exist" | "wait_not_exist";
 };
 
 type OcrCandidateDialogState = {
   open: boolean;
-  mode: "node_capture" | "recording_mark";
   targetFlow: string | null;
   targetNodeId: string | null;
   regionText: string;
   candidates: string[];
   selected: string;
+};
+
+type ImageLightboxState = {
+  src: string;
+  title: string;
 };
 
 const EMPTY_BRANCH = {
@@ -121,36 +137,7 @@ function uniqueNodeId(): string {
 }
 
 function summarizeNode(node: OperationNodeDTO): string {
-  switch (node.operation) {
-    case "click":
-      return `Click ${node.param_text || "left"}`;
-    case "mDown":
-      return `Mouse down ${node.param_text || "left"}`;
-    case "mUp":
-      return `Mouse up ${node.param_text || "left"}`;
-    case "mMove":
-      return `Move by ${node.param_text || "0;0"}`;
-    case "mMoveTo":
-      return `Move to ${node.param_text || "0;0"}`;
-    case "press":
-      return `Press ${node.param_text || "(unset)"}`;
-    case "kDown":
-      return `Key down ${node.param_text || "(unset)"}`;
-    case "kUp":
-      return `Key up ${node.param_text || "(unset)"}`;
-    case "write":
-      return `Write ${node.param_text || "(empty)"}`;
-    case "notify":
-      return `Notify ${node.param_text || "(empty)"}`;
-    case "jmp":
-      return `Jump ${node.param_text || "(unset)"}`;
-    case "pic":
-      return `Picture ${node.search_target || "(unset)"}`;
-    case "ocr":
-      return `OCR ${node.search_target || "(unset)"}`;
-    default:
-      return node.operation || "(empty)";
-  }
+  return getNodeRowView(node).summary;
 }
 
 function reindexFlow(flow: FlowDocumentDTO): FlowDocumentDTO {
@@ -241,7 +228,7 @@ function moveSelectedNodes(nodes: OperationNodeDTO[], selectedIds: string[], dir
 
 function labelFromPath(path: string | null | undefined): string {
   if (!path) {
-    return "No config loaded";
+    return "未加载配置";
   }
   const parts = path.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
@@ -250,74 +237,56 @@ function labelFromPath(path: string | null | undefined): string {
 function describeFlow(flow: FlowDocumentDTO): string {
   const lower = flow.filename.toLowerCase();
   if (lower.includes("main")) {
-    return "main automation flow";
+    return "主流程";
   }
   if (lower.includes("battle")) {
-    return "battle routine";
+    return "战斗流程";
   }
   if (lower.includes("return")) {
-    return "return handling flow";
+    return "返回流程";
   }
   if (lower.includes("pending")) {
-    return "holding area flow";
+    return "暂存流程";
   }
-  return flow.nodes.length <= 12 ? "sub flow" : "automation flow";
+  return flow.nodes.length <= 12 ? "子流程" : "自动化流程";
 }
 
 function summarizeBranch(node: OperationNodeDTO | null): string {
   if (!node) {
-    return "No branch configured.";
+    return "未配置分支";
   }
   const targets = [node.branch.primary_target, node.branch.secondary_target].filter(Boolean).join(" / ");
   if (node.branch.mode === "none" && node.branch.trigger === "none") {
-    return "No branch configured.";
+    return "未配置分支";
   }
   const details = [
-    node.branch.trigger !== "none" ? `trigger ${node.branch.trigger}` : "",
-    node.branch.mode !== "none" ? `mode ${node.branch.mode}` : "",
+    node.branch.trigger !== "none" ? `触发 ${node.branch.trigger}` : "",
+    node.branch.mode !== "none" ? `模式 ${node.branch.mode}` : "",
     targets,
   ]
     .filter(Boolean)
     .join(" · ");
-  return details || "No branch configured.";
+  return details || "未配置分支";
 }
 
 function compactLocator(node: OperationNodeDTO): string {
-  return node.search_target || node.param_text || "Unset target";
+  return getNodeRowView(node).locator_text;
 }
 
 function compactRegion(node: OperationNodeDTO): string {
-  return node.region_text || "-";
+  return getNodeRowView(node).region_text;
 }
 
 function compactTiming(node: OperationNodeDTO): string {
-  const wait = node.wait_value || "-";
-  const retry = node.retry_value || "-";
-  const move = node.move_time || "-";
-  return `W ${wait} · R ${retry} · M ${move}`;
+  return getNodeRowView(node).timing_text;
 }
 
 function compactBranch(node: OperationNodeDTO): string {
-  if (node.branch.mode === "none" && node.branch.trigger === "none") {
-    return "none";
-  }
-  const targets = [node.branch.primary_target, node.branch.secondary_target].filter(Boolean).join(" / ");
-  return [node.branch.trigger !== "none" ? node.branch.trigger : "", node.branch.mode !== "none" ? node.branch.mode : "", targets]
-    .filter(Boolean)
-    .join(" · ");
+  return getNodeRowView(node).branch_text;
 }
 
 function compactSummary(node: OperationNodeDTO): string {
-  if (node.note) {
-    return node.note;
-  }
-  if (node.jump_mark) {
-    return `mark ${node.jump_mark}`;
-  }
-  if (node.confidence_text) {
-    return `confidence ${node.confidence_text}`;
-  }
-  return summarizeNode(node);
+  return getNodeRowView(node).secondary_text;
 }
 
 function parseConfidence(value: string): number {
@@ -340,7 +309,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 const EMPTY_OCR_CANDIDATE_DIALOG: OcrCandidateDialogState = {
   open: false,
-  mode: "node_capture",
   targetFlow: null,
   targetNodeId: null,
   regionText: "",
@@ -412,15 +380,17 @@ export default function App() {
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [flowQuery, setFlowQuery] = useState("");
-  const [density, setDensity] = useState<"compact" | "comfortable">("compact");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [createOperation, setCreateOperation] = useState("click");
   const [activeToolWindow, setActiveToolWindow] = useState<ToolWindow>("none");
   const [issues, setIssues] = useState<ValidationIssueDTO[]>([]);
   const [unusedImages, setUnusedImages] = useState<UnusedImageDTO[]>([]);
   const [selectedUnusedImageNames, setSelectedUnusedImageNames] = useState<string[]>([]);
   const [previewImagePath, setPreviewImagePath] = useState<string | null>(null);
-  const [notice, setNotice] = useState<Notice>({ tone: "idle", text: "Waiting for bridge bootstrap..." });
+  const [imageLightbox, setImageLightbox] = useState<ImageLightboxState | null>(null);
+  const [windowMaximized, setWindowMaximized] = useState(false);
+  const [notice, setNotice] = useState<Notice>({ tone: "idle", text: "正在等待编辑器桥接启动..." });
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [importDialog, setImportDialog] = useState<ImportDialogState>({
     open: false,
@@ -440,8 +410,6 @@ export default function App() {
     selectedRecordedNodeIds: [],
     reviewRows: [],
     summary: null,
-    markKind: "pic",
-    markAction: "locate",
   });
   const [ocrCandidateDialog, setOcrCandidateDialog] = useState<OcrCandidateDialogState>(EMPTY_OCR_CANDIDATE_DIALOG);
   const document = history.present;
@@ -592,18 +560,7 @@ export default function App() {
       return currentFlow.nodes;
     }
     return currentFlow.nodes.filter((node) => {
-      const haystack = [
-        node.index,
-        node.operation,
-        node.param_text,
-        node.search_target,
-        node.region_text,
-        node.jump_mark,
-        node.note,
-        summarizeNode(node),
-      ]
-        .join(" ")
-        .toLowerCase();
+      const haystack = [node.index, getNodeRowView(node).search_text].join(" ").toLowerCase();
       return haystack.includes(query);
     });
   }, [currentFlow, searchQuery]);
@@ -616,7 +573,7 @@ export default function App() {
     }
     return flows.filter((flow) => {
       const nodeHaystack = flow.nodes
-        .map((node) => [node.operation, node.param_text, node.search_target, node.region_text, node.jump_mark, node.note].join(" "))
+        .map((node) => getNodeRowView(node).search_text)
         .join(" ");
       const haystack = [flow.filename, describeFlow(flow), flow.nodes.length, nodeHaystack].join(" ").toLowerCase();
       return haystack.includes(query);
@@ -624,6 +581,29 @@ export default function App() {
   }, [document, flowQuery]);
 
   const csvPreview = useMemo(() => (currentFlow ? buildCsvPreview(currentFlow) : ""), [currentFlow]);
+  const operationEntries = useMemo(() => getOperationEntries(bootstrap), [bootstrap]);
+  const jumpTargetOptions = useMemo(
+    () => (currentFlow ? currentFlow.nodes.map((node) => node.jump_mark.trim()).filter(Boolean) : []),
+    [currentFlow],
+  );
+  const flowNameOptions = useMemo(() => (document?.flows ?? []).map((flow) => flow.filename), [document]);
+  const branchTargetOptions = useMemo(
+    () => getBranchOptions(flowNameOptions, jumpTargetOptions),
+    [flowNameOptions, jumpTargetOptions],
+  );
+  const activeNodeMeta = useMemo(
+    () => (activeNode ? getOperationMeta(bootstrap, activeNode.operation) : null),
+    [activeNode, bootstrap],
+  );
+  const activeRowView = useMemo(() => (activeNode ? getNodeRowView(activeNode) : null), [activeNode]);
+  const paramEditorConfig = useMemo(
+    () => (activeNode ? getParamEditorConfig(activeNode.operation, jumpTargetOptions) : null),
+    [activeNode, jumpTargetOptions],
+  );
+  const activeHelpers = useMemo(
+    () => (activeNode ? getAllowedHelpers(bootstrap, activeNode.operation) : []),
+    [activeNode, bootstrap],
+  );
   const dirty = useMemo(() => !isEditorHistoryClean(history), [history]);
   const issueSummary = useMemo(
     () =>
@@ -660,15 +640,32 @@ export default function App() {
   );
 
   async function initialize() {
-    const result = await bridge.getBootstrap();
-    if (!result.ok) {
-      setNotice({ tone: "error", text: result.error.message });
-      return;
-    }
-    setBootstrap(result.data);
-    setNotice({ tone: "success", text: "Bridge ready." });
-    if (result.data.initial_root_path) {
-      await openDocument(result.data.initial_root_path);
+    const maxAttempts = 20;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const result = await bridge.getBootstrap();
+      if (result.ok) {
+        setBootstrap(result.data);
+        const initialOperation = result.data.operation_types?.[0];
+        if (initialOperation) {
+          setCreateOperation(initialOperation);
+        }
+        setNotice({ tone: "success", text: "编辑器桥接已就绪。" });
+        if (result.data.initial_root_path) {
+          await openDocument(result.data.initial_root_path);
+        }
+        return;
+      }
+
+      const shouldRetry =
+        result.error.code === "not_implemented" ||
+        result.error.message.includes("get_bootstrap is unavailable") ||
+        result.error.message.includes("get_bootstrap");
+      if (!shouldRetry || attempt === maxAttempts) {
+        setNotice({ tone: "error", text: result.error.message });
+        return;
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
     }
   }
 
@@ -759,7 +756,7 @@ export default function App() {
     setPreviewImagePath(null);
     setSelectedNodeIds(result.data.state.selected_node_id ? [result.data.state.selected_node_id] : []);
     replaceDocument(result.data);
-    setNotice({ tone: "success", text: `Loaded ${rootPath}` });
+    setNotice({ tone: "success", text: `已加载配置：${rootPath}` });
   }
 
   async function handleChooseDirectory() {
@@ -770,6 +767,29 @@ export default function App() {
     }
     if (result.data) {
       await openDocument(result.data);
+    }
+  }
+
+  async function handleWindowMinimize() {
+    const result = await bridge.minimizeWindow();
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.error.message });
+    }
+  }
+
+  async function handleWindowToggleMaximize() {
+    const result = await bridge.toggleMaximizeWindow();
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.error.message });
+      return;
+    }
+    setWindowMaximized(Boolean(result.data?.maximized));
+  }
+
+  async function handleWindowClose() {
+    const result = await bridge.closeWindow();
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.error.message });
     }
   }
 
@@ -785,7 +805,7 @@ export default function App() {
       return;
     }
     replaceDocument(result.data.document);
-    setNotice({ tone: "success", text: "Document saved." });
+    setNotice({ tone: "success", text: "CSV 已保存。" });
   }
 
   async function handleValidate() {
@@ -800,7 +820,7 @@ export default function App() {
       return;
     }
     setIssues(result.data);
-    setNotice({ tone: "success", text: `Validation finished with ${result.data.length} issues.` });
+    setNotice({ tone: "success", text: `校验完成，共 ${result.data.length} 个问题。` });
   }
 
   async function handleScanImages() {
@@ -817,7 +837,7 @@ export default function App() {
     setUnusedImages(result.data);
     setSelectedUnusedImageNames([]);
     setPreviewImagePath(result.data[0]?.image_path ?? null);
-    setNotice({ tone: "success", text: `Found ${result.data.length} unused images.` });
+    setNotice({ tone: "success", text: `发现 ${result.data.length} 张未使用图片。` });
   }
 
   function toggleUnusedImageSelection(imageName: string, checked: boolean) {
@@ -868,11 +888,11 @@ export default function App() {
       return nextUnusedImages[0]?.image_path ?? null;
     });
     const parts = [
-      result.data.deleted.length ? `deleted ${result.data.deleted.length}` : "",
-      result.data.missing.length ? `missing ${result.data.missing.length}` : "",
-      result.data.failed.length ? `failed ${result.data.failed.length}` : "",
+      result.data.deleted.length ? `已删 ${result.data.deleted.length}` : "",
+      result.data.missing.length ? `缺失 ${result.data.missing.length}` : "",
+      result.data.failed.length ? `失败 ${result.data.failed.length}` : "",
     ].filter(Boolean);
-    setNotice({ tone: result.data.failed.length ? "warning" : "success", text: `Unused assets update: ${parts.join(" · ")}` });
+    setNotice({ tone: result.data.failed.length ? "warning" : "success", text: `图片清理结果：${parts.join(" · ")}` });
   }
 
   function handleUndo() {
@@ -931,15 +951,15 @@ export default function App() {
     setSelectedNodeIds((current) => (current.includes(nodeId) ? current : [nodeId]));
   }
 
-  function addNode() {
+  function addNode(operation: string) {
     if (!document || !currentFlow) {
       return;
     }
-    const newNode = cloneDocument(EMPTY_NODE);
+    const newNode = cloneDocument(createNodeForOperation(operation));
     newNode.node_id = uniqueNodeId();
     const anchorId = document.state.selected_node_id;
     commitDocument(
-      "Add node",
+      "新增节点",
       (draft) => {
         const flow = flowByName(draft, draft.state.selected_flow);
         if (!flow) {
@@ -953,6 +973,7 @@ export default function App() {
       { selectionAfter: [newNode.node_id] },
     );
     setSelectedNodeIds([newNode.node_id]);
+    setNotice({ tone: "success", text: `已新增 ${getOperationMeta(bootstrap, operation).label} 节点。` });
   }
 
   function deleteNodes() {
@@ -964,7 +985,7 @@ export default function App() {
       return;
     }
     commitDocument(
-      "Delete nodes",
+      "删除节点",
       (draft) => {
         const flow = flowByName(draft, draft.state.selected_flow);
         if (!flow) {
@@ -998,7 +1019,7 @@ export default function App() {
       return;
     }
     commitDocument(
-      direction < 0 ? "Move nodes up" : "Move nodes down",
+      direction < 0 ? "上移节点" : "下移节点",
       (draft) => {
         const flow = flowByName(draft, draft.state.selected_flow);
         if (!flow) {
@@ -1016,7 +1037,7 @@ export default function App() {
     }
     const nodes = currentFlow.nodes.filter((node) => selectedNodeIds.includes(node.node_id));
     if (!nodes.length) {
-      setNotice({ tone: "warning", text: "Select one or more nodes first." });
+      setNotice({ tone: "warning", text: "请先选择一个或多个节点。" });
       return;
     }
     const payload: NodeClipboardPayloadDTO = {
@@ -1028,7 +1049,7 @@ export default function App() {
     const result = await bridge.writeClipboardNodes(payload);
     setNotice({
       tone: result.ok ? "success" : "error",
-      text: result.ok ? `Copied ${nodes.length} nodes.` : result.error.message,
+      text: result.ok ? `已复制 ${nodes.length} 个节点。` : result.error.message,
     });
   }
 
@@ -1042,13 +1063,13 @@ export default function App() {
       return;
     }
     if (!result.data?.nodes?.length) {
-      setNotice({ tone: "warning", text: "Clipboard does not contain editor nodes." });
+      setNotice({ tone: "warning", text: "剪贴板中没有可用于编辑器的节点数据。" });
       return;
     }
     const cloned = cloneNodesForInsert(result.data.nodes, currentFlow);
     const anchorId = document.state.selected_node_id;
     commitDocument(
-      "Paste nodes",
+      "粘贴节点",
       (draft) => {
         const flow = flowByName(draft, draft.state.selected_flow);
         if (!flow) {
@@ -1062,7 +1083,7 @@ export default function App() {
       { selectionAfter: cloned.map((node) => node.node_id) },
     );
     setSelectedNodeIds(cloned.map((node) => node.node_id));
-    setNotice({ tone: "success", text: `Pasted ${cloned.length} nodes.` });
+    setNotice({ tone: "success", text: `已粘贴 ${cloned.length} 个节点。` });
   }
 
   function updateNodeField(field: keyof OperationNodeDTO, value: string | boolean) {
@@ -1071,7 +1092,7 @@ export default function App() {
     }
     const activeId = activeNode.node_id;
     commitDocument(
-      `Edit ${String(field)}`,
+      `编辑字段 ${String(field)}`,
       (draft) => {
         const flow = flowByName(draft, draft.state.selected_flow);
         const node = flow?.nodes.find((item) => item.node_id === activeId);
@@ -1087,13 +1108,35 @@ export default function App() {
     );
   }
 
+  function changeNodeOperation(operation: string) {
+    if (!document || !activeNode) {
+      return;
+    }
+    const activeId = activeNode.node_id;
+    commitDocument(
+      "切换节点类型",
+      (draft) => {
+        const flow = flowByName(draft, draft.state.selected_flow);
+        const node = flow?.nodes.find((item) => item.node_id === activeId);
+        if (!node) {
+          return;
+        }
+        const normalized = normalizeNodeForOperation(node, operation);
+        Object.assign(node, normalized);
+      },
+      {
+        selectionAfter: [activeId],
+      },
+    );
+  }
+
   function updateBranchField(field: keyof OperationNodeDTO["branch"], value: string) {
     if (!document || !activeNode) {
       return;
     }
     const activeId = activeNode.node_id;
     commitDocument(
-      `Edit branch ${String(field)}`,
+      `编辑分支字段 ${String(field)}`,
       (draft) => {
         const flow = flowByName(draft, draft.state.selected_flow);
         const node = flow?.nodes.find((item) => item.node_id === activeId);
@@ -1114,7 +1157,7 @@ export default function App() {
       return;
     }
     if (mode === "point") {
-      const result = await bridge.capturePoint("Pick a coordinate for this node");
+      const result = await bridge.capturePoint("请为当前节点拾取屏幕坐标");
       if (!result.ok) {
         setNotice({ tone: "error", text: result.error.message });
         return;
@@ -1123,12 +1166,12 @@ export default function App() {
         return;
       }
       updateNodeField("param_text", result.data.point_text);
-      setNotice({ tone: "success", text: `Captured point ${result.data.point_text}.` });
+      setNotice({ tone: "success", text: `已回填坐标 ${result.data.point_text}。` });
       return;
     }
 
     const result = await bridge.captureRegion({
-      prompt: mode === "pic" ? "Capture a picture region for this node" : "Capture an OCR region for this node",
+      prompt: mode === "pic" ? "请框选当前识图节点的截图区域" : "请框选当前 OCR 节点的识别区域",
       root_path: document.root_path,
       save_image: mode === "pic",
       ocr_preview: mode === "ocr",
@@ -1153,7 +1196,6 @@ export default function App() {
       if (ocrCandidates.length > 1) {
         setOcrCandidateDialog({
           open: true,
-          mode: "node_capture",
           targetFlow: currentFlow?.filename ?? document.state.selected_flow,
           targetNodeId: activeNode.node_id,
           regionText,
@@ -1167,7 +1209,7 @@ export default function App() {
     }
     const activeId = activeNode.node_id;
     commitDocument(
-      `Capture ${mode.toUpperCase()} target`,
+      mode === "pic" ? "回填识图区域" : "回填 OCR 区域",
       (draft) => {
         const flow = flowByName(draft, draft.state.selected_flow);
         const node = flow?.nodes.find((item) => item.node_id === activeId);
@@ -1179,7 +1221,7 @@ export default function App() {
       },
       { selectionAfter: [activeId] },
     );
-    setNotice({ tone: "success", text: `Captured ${mode.toUpperCase()} region.` });
+    setNotice({ tone: "success", text: mode === "pic" ? "已回填识图区域。" : "已回填 OCR 区域。" });
   }
 
   async function openImportDialog() {
@@ -1215,13 +1257,21 @@ export default function App() {
   }
 
   async function importSelectedNodes() {
-    if (!document || !currentFlow || !importDialog.rootPath || !importDialog.selectedFlow) {
+    if (!document || !currentFlow || !importDialog.rootPath || !importDialog.selectedFlow || !importDialog.document) {
       return;
     }
+    const sourceFlow = flowByName(importDialog.document, importDialog.selectedFlow);
+    if (!sourceFlow) {
+      setNotice({ tone: "error", text: `无法读取导入流程：${importDialog.selectedFlow}` });
+      return;
+    }
+    const nodeIndexes = sourceFlow.nodes
+      .filter((node) => importDialog.selectedNodeIds.includes(node.node_id))
+      .map((node) => node.index);
     const result = await bridge.importNodes({
       root_path: importDialog.rootPath,
       flow_name: importDialog.selectedFlow,
-      node_ids: importDialog.selectedNodeIds,
+      node_indexes: nodeIndexes,
     });
     if (!result.ok) {
       setNotice({ tone: "error", text: result.error.message });
@@ -1230,7 +1280,7 @@ export default function App() {
     const cloned = cloneNodesForInsert(result.data, currentFlow);
     const anchorId = document.state.selected_node_id;
     commitDocument(
-      "Import nodes",
+      "导入节点",
       (draft) => {
         const flow = flowByName(draft, draft.state.selected_flow);
         if (!flow) {
@@ -1245,7 +1295,7 @@ export default function App() {
     );
     setSelectedNodeIds(cloned.map((node) => node.node_id));
     setImportDialog((current) => ({ ...current, open: false }));
-    setNotice({ tone: "success", text: `Imported ${cloned.length} nodes.` });
+    setNotice({ tone: "success", text: `已导入 ${cloned.length} 个节点。` });
   }
 
   async function openRecordingDialog() {
@@ -1291,7 +1341,7 @@ export default function App() {
       reviewRows: [],
       summary: null,
     }));
-    setNotice({ tone: "success", text: "Recording started." });
+    setNotice({ tone: "success", text: "录制已开始。" });
   }
 
   async function toggleRecordingPaused(paused: boolean) {
@@ -1305,7 +1355,7 @@ export default function App() {
       return;
     }
     setRecordingDialog((current) => ({ ...current, session: result.data }));
-    setNotice({ tone: "success", text: paused ? "Recording paused." : "Recording resumed." });
+    setNotice({ tone: "success", text: paused ? "录制已暂停。" : "录制已继续。" });
   }
 
   async function stopRecording() {
@@ -1326,70 +1376,7 @@ export default function App() {
       reviewRows: result.data.review_rows,
       summary: result.data.summary,
     }));
-    setNotice({ tone: "success", text: `Recorded ${result.data.nodes.length} nodes.` });
-  }
-
-  async function addRecordingVisualMark() {
-    if (!document || !recordingDialog.session?.session_id) {
-      return;
-    }
-    const captureResult = await bridge.captureRegion({
-      prompt: "Capture a visual marker region",
-      root_path: document.root_path,
-      save_image: recordingDialog.markKind === "pic",
-      ocr_preview: recordingDialog.markKind === "ocr",
-    });
-    if (!captureResult.ok) {
-      setNotice({ tone: "error", text: captureResult.error.message });
-      return;
-    }
-    if (!captureResult.data) {
-      return;
-    }
-    let searchTarget = "";
-    let note = "";
-    if (recordingDialog.markKind === "pic") {
-      const imagePath = String(captureResult.data.image_path ?? "");
-      searchTarget = imagePath.split(/[/\\]/).pop() ?? "";
-    } else {
-      const ocrCandidates = Array.isArray(captureResult.data.ocr_candidates)
-        ? captureResult.data.ocr_candidates.map((candidate) => String(candidate).trim()).filter(Boolean)
-        : [];
-      const suggestedText = String(captureResult.data.suggested_text ?? "").trim();
-      if (ocrCandidates.length > 1) {
-        setOcrCandidateDialog({
-          open: true,
-          mode: "recording_mark",
-          targetFlow: null,
-          targetNodeId: null,
-          regionText: String(captureResult.data.region_text ?? ""),
-          candidates: ocrCandidates,
-          selected: ocrCandidates[0] ?? suggestedText,
-        });
-        return;
-      }
-      searchTarget = suggestedText || ocrCandidates[0] || "";
-      if (!searchTarget) {
-        note = "OCR recording did not resolve a target. Review before inserting nodes.";
-      }
-    }
-    await submitRecordingVisualMark(searchTarget, String(captureResult.data.region_text ?? ""), note);
-  }
-
-  async function submitRecordingVisualMark(searchTarget: string, regionText: string, note = "") {
-    const result = await bridge.addVisualMark({
-      kind: recordingDialog.markKind,
-      action: recordingDialog.markAction,
-      search_target: searchTarget,
-      region_text: regionText,
-      note,
-    });
-    if (!result.ok) {
-      setNotice({ tone: "error", text: result.error.message });
-      return;
-    }
-    setRecordingDialog((current) => ({ ...current, session: result.data }));
-    setNotice({ tone: "success", text: "Visual mark added." });
+    setNotice({ tone: "success", text: `录制得到 ${result.data.nodes.length} 个节点。` });
   }
 
   function confirmOcrCandidateDialog() {
@@ -1398,17 +1385,7 @@ export default function App() {
     }
     const selected = ocrCandidateDialog.selected.trim();
     if (!selected) {
-      setNotice({ tone: "warning", text: "Select or enter an OCR candidate first." });
-      return;
-    }
-    if (ocrCandidateDialog.mode === "recording_mark") {
-      const regionText = ocrCandidateDialog.regionText;
-      const note =
-        ocrCandidateDialog.candidates.length > 1
-          ? `OCR recording candidates: ${ocrCandidateDialog.candidates.slice(0, 5).join(" | ")}`
-          : "";
-      setOcrCandidateDialog(EMPTY_OCR_CANDIDATE_DIALOG);
-      void submitRecordingVisualMark(selected, regionText, note);
+      setNotice({ tone: "warning", text: "请先选择或输入一个 OCR 候选文本。" });
       return;
     }
     if (!document || !ocrCandidateDialog.targetFlow || !ocrCandidateDialog.targetNodeId) {
@@ -1417,7 +1394,7 @@ export default function App() {
     }
     const { targetFlow, targetNodeId, regionText } = ocrCandidateDialog;
     commitDocument(
-      "Capture OCR target",
+      "确认 OCR 候选",
       (draft) => {
         const flow = flowByName(draft, targetFlow);
         const node = flow?.nodes.find((item) => item.node_id === targetNodeId);
@@ -1433,12 +1410,12 @@ export default function App() {
     );
     setSelectedNodeIds([targetNodeId]);
     setOcrCandidateDialog(EMPTY_OCR_CANDIDATE_DIALOG);
-    setNotice({ tone: "success", text: "Captured OCR region." });
+    setNotice({ tone: "success", text: "已回填 OCR 文本与区域。" });
   }
 
   function closeRecordingDialog() {
     if (recordingDialog.session?.close_protected ?? ["recording", "paused"].includes(recordingDialog.session?.status ?? "")) {
-      setNotice({ tone: "warning", text: "Stop recording before closing the workflow window." });
+      setNotice({ tone: "warning", text: "请先停止录制，再关闭录制窗口。" });
       return;
     }
     setRecordingDialog((current) => ({ ...current, open: false }));
@@ -1460,7 +1437,7 @@ export default function App() {
       return;
     }
     const copiedCount = selectedIds.length || recordingDialog.recordedNodes.length;
-    setNotice({ tone: "success", text: `Copied ${copiedCount} recorded nodes.` });
+    setNotice({ tone: "success", text: `已复制 ${copiedCount} 个录制节点。` });
   }
 
   function insertRecordedNodes() {
@@ -1470,7 +1447,7 @@ export default function App() {
     const cloned = cloneNodesForInsert(recordingDialog.recordedNodes, currentFlow);
     const anchorId = document.state.selected_node_id;
     commitDocument(
-      "Insert recorded nodes",
+      "插入录制节点",
       (draft) => {
         const flow = flowByName(draft, draft.state.selected_flow);
         if (!flow) {
@@ -1491,7 +1468,7 @@ export default function App() {
       selectedRecordedNodeIds: [],
       session: null,
     }));
-    setNotice({ tone: "success", text: `Inserted ${cloned.length} recorded nodes.` });
+    setNotice({ tone: "success", text: `已插入 ${cloned.length} 个录制节点。` });
   }
 
   function toggleRecordedNodeSelection(nodeId: string, checked: boolean) {
@@ -1522,37 +1499,42 @@ export default function App() {
   const configLabel = labelFromPath(document?.root_path);
   const selectedCount = selectedNodeIds.length || (activeNode ? 1 : 0);
   const confidenceValue = parseConfidence(activeNode?.confidence_text ?? "");
-  const activeNodeDetail = activeNode?.search_target || activeNode?.param_text || "Unset target";
   const recordingSessionActive = Boolean(
     recordingDialog.session?.close_protected ?? (recordingDialog.session && ["recording", "paused"].includes(recordingDialog.session.status)),
   );
   const currentFlowSummary = currentFlow
-    ? `${currentFlow.filename} · ${visibleNodes.length}/${currentFlow.nodes.length} rows visible`
-    : "Select a flow to start editing.";
-  const flowOperationSummary = quickFilters.length
-    ? quickFilters.map((filter) => `${filter.operation.toUpperCase()} ${filter.count}`).join(" · ")
-    : "No operation clusters in the current flow.";
+    ? `${currentFlow.filename} · 可见 ${visibleNodes.length}/${currentFlow.nodes.length} 行`
+    : "选择一个流程后开始编辑。";
+  const showWaitFields = hasVisibleField(activeNodeMeta, "wait_value") || hasVisibleField(activeNodeMeta, "wait_random");
+  const showRetryFields = hasVisibleField(activeNodeMeta, "retry_value") || hasVisibleField(activeNodeMeta, "retry_random");
+  const showBranchFields = [
+    "branch.trigger",
+    "branch.mode",
+    "branch.primary_target",
+    "branch.secondary_target",
+  ].some((field) => hasVisibleField(activeNodeMeta, field));
+  const showMoveTimeField =
+    activeNode?.operation !== "pic" &&
+    activeNode?.operation !== "ocr" &&
+    hasVisibleField(activeNodeMeta, "move_time");
+  const inspectorImageTitle = activeNode?.search_target || "当前节点图片";
+  const supportsWindowControls = Boolean(bootstrap?.capabilities?.window_controls);
 
   return (
     <div className="app-shell">
       <div className="editor-frame" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
         <div className="stage-shell" style={{ gap: 10 }}>
-          <header className="topbar" style={{ padding: density === "compact" ? "10px 12px" : undefined, borderRadius: 16, gap: 8 }}>
-            <div className="topbar-copy" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <strong style={{ fontSize: 15, fontWeight: 800 }}>{bootstrap?.app_name ?? "CsvAutoGui Editor"}</strong>
-              <span className="status-pill tone-idle" style={{ minHeight: 28, padding: "4px 10px", fontSize: 12 }}>
-                {configLabel}
-              </span>
-              <span style={COMMAND_LABEL_STYLE}>
-                {document ? `${document.flows.length} flows · ${totalNodes} nodes` : "Open a config directory to begin"}
-              </span>
+          <header className="topbar topbar-compact">
+            <div className="topbar-copy topbar-copy-compact titlebar-drag-region pywebview-drag-region">
+              <strong style={{ fontSize: 15, fontWeight: 800 }}>{bootstrap?.app_name ?? "CsvAutoGui 编辑器"}</strong>
+              <span className="status-pill tone-idle">{configLabel}</span>
+              <span style={COMMAND_LABEL_STYLE}>{document ? `${document.flows.length} 个流程 · ${totalNodes} 个节点` : "先打开一个配置目录"}</span>
             </div>
 
-            <div className="topbar-actions" style={{ gap: 10 }}>
+            <div className="topbar-actions topbar-actions-compact titlebar-button-region">
               <div style={COMMAND_GROUP_STYLE}>
-                <span style={COMMAND_LABEL_STYLE}>File</span>
                 <button className="ghost-button accent-teal" style={COMPACT_BUTTON_STYLE} onClick={() => void handleChooseDirectory()}>
-                  Open
+                  打开配置
                 </button>
                 <button
                   className="soft-button accent-teal"
@@ -1560,84 +1542,67 @@ export default function App() {
                   onClick={() => void handleSave()}
                   disabled={!document || busy.save}
                 >
-                  Save
+                  保存 CSV
                 </button>
-              </div>
-
-              <div style={COMMAND_GROUP_STYLE}>
-                <span style={COMMAND_LABEL_STYLE}>Review</span>
                 <button
                   className="ghost-button accent-amber"
                   style={COMPACT_BUTTON_STYLE}
                   onClick={() => void handleValidate()}
                   disabled={!document || busy.validate}
                 >
-                  Validate
+                  校验
                 </button>
-                <button
-                  className="ghost-button"
-                  style={COMPACT_BUTTON_STYLE}
-                  onClick={() => void openUnusedAssetsWorkspace()}
-                  disabled={!document}
-                >
-                  Assets
+                <button className="ghost-button" style={COMPACT_BUTTON_STYLE} onClick={() => void openUnusedAssetsWorkspace()} disabled={!document}>
+                  图片管理
                 </button>
-                <button
-                  className="ghost-button"
-                  style={COMPACT_BUTTON_STYLE}
-                  onClick={() => setActiveToolWindow("csv_preview")}
-                  disabled={!document}
-                >
-                  Preview
+                <button className="ghost-button" style={COMPACT_BUTTON_STYLE} onClick={() => setActiveToolWindow("csv_preview")} disabled={!document}>
+                  CSV 预览
                 </button>
-              </div>
-
-              <div style={COMMAND_GROUP_STYLE}>
-                <span style={COMMAND_LABEL_STYLE}>Tools</span>
                 <button
                   className="ghost-button accent-amber"
                   style={COMPACT_BUTTON_STYLE}
                   onClick={() => void openRecordingDialog()}
                   disabled={!document}
                 >
-                  Record
-                </button>
-                <button
-                  className="ghost-button"
-                  style={COMPACT_BUTTON_STYLE}
-                  onClick={() => setDensity((current) => (current === "compact" ? "comfortable" : "compact"))}
-                >
-                  {density === "compact" ? "Dense" : "Comfort"}
+                  录制模式
                 </button>
               </div>
-            </div>
-
-            <div className="status-cluster" style={{ gridColumn: "auto", justifyContent: "flex-end", gap: 6 }}>
-              <span className={`status-pill tone-${notice.tone}`} style={{ minHeight: 28, padding: "4px 10px", fontSize: 12 }}>
-                {notice.text}
-              </span>
-              <span
-                className={`status-pill ${dirty ? "tone-warning" : "tone-success"}`}
-                style={{ minHeight: 28, padding: "4px 10px", fontSize: 12 }}
-              >
-                {dirty ? "Unsaved" : "Saved"}
-              </span>
+              <span className={`status-pill tone-${notice.tone}`}>{notice.text}</span>
+              <span className={`status-pill ${dirty ? "tone-warning" : "tone-success"}`}>{dirty ? "未保存" : "已保存"}</span>
+              {supportsWindowControls && (
+                <div className="window-controls">
+                  <button type="button" className="window-control-button" title="最小化" onClick={() => void handleWindowMinimize()}>
+                    _
+                  </button>
+                  <button
+                    type="button"
+                    className="window-control-button"
+                    title={windowMaximized ? "还原" : "最大化"}
+                    onClick={() => void handleWindowToggleMaximize()}
+                  >
+                    {windowMaximized ? "❐" : "□"}
+                  </button>
+                  <button type="button" className="window-control-button danger" title="关闭" onClick={() => void handleWindowClose()}>
+                    ×
+                  </button>
+                </div>
+              )}
             </div>
           </header>
 
-          <section className={`workspace-grid density-${density} ${leftCollapsed ? "left-collapsed" : ""} ${rightCollapsed ? "right-collapsed" : ""}`}>
-            <aside className={`panel left-column ${leftCollapsed ? "collapsed-panel" : ""}`} style={{ padding: density === "compact" ? "12px" : undefined, gap: 10 }}>
+          <section className={`workspace-grid compact-shell ${leftCollapsed ? "left-collapsed" : ""} ${rightCollapsed ? "right-collapsed" : ""}`}>
+            <aside className={`panel left-column ${leftCollapsed ? "collapsed-panel" : ""}`}>
               <div className="panel-header compact">
                 <div>
-                  <h2>Flows</h2>
-                  <p>Navigation and health signals.</p>
+                  <h2>流程</h2>
+                  <p>切换 CSV 与查看校验问题。</p>
                 </div>
                 <div className="panel-header-actions">
                   <span className="panel-count" style={{ minWidth: 34, minHeight: 34, borderRadius: 12 }}>
                     {document?.flows.length ?? 0}
                   </span>
                   <button className="icon-button" onClick={() => setLeftCollapsed((current) => !current)}>
-                    {leftCollapsed ? "Show" : "Hide"}
+                    {leftCollapsed ? "展开" : "收起"}
                   </button>
                 </div>
               </div>
@@ -1649,12 +1614,12 @@ export default function App() {
                       <input
                         value={flowQuery}
                         onChange={(event) => setFlowQuery(event.target.value)}
-                        placeholder="Search flows or node text..."
+                        placeholder="搜索流程文件或节点内容"
                         style={{ padding: "8px 10px" }}
                       />
                     </div>
 
-                    <span style={COMMAND_LABEL_STYLE}>{`${visibleFlows.length} visible · ${issues.length} issues · ${unusedImages.length} unused`}</span>
+                    <span style={COMMAND_LABEL_STYLE}>{`${visibleFlows.length} 个流程 · ${issues.length} 个问题 · ${unusedImages.length} 张未使用图片`}</span>
                   </div>
 
                   <div className="flow-list" style={{ gap: 8 }}>
@@ -1663,27 +1628,27 @@ export default function App() {
                         key={flow.filename}
                         className={flow.filename === document?.state.selected_flow ? "flow-item active" : "flow-item"}
                         onClick={() => selectFlow(flow.filename)}
-                        style={{ padding: density === "compact" ? "10px 12px" : undefined, borderRadius: 14, gap: 10 }}
+                        style={{ padding: "10px 12px", borderRadius: 14, gap: 10 }}
                       >
                         <div className="flow-text" style={{ gap: 4, minWidth: 0 }}>
                           <strong className="flow-name" style={{ fontSize: 14 }}>
                             {flow.filename}
                           </strong>
                           <span className="flow-meta" title={describeFlow(flow)}>
-                            {`${flow.nodes.length} nodes · ${describeFlow(flow)}`}
+                            {`${flow.nodes.length} 个节点 · ${describeFlow(flow)}`}
                           </span>
                         </div>
                         <strong className="flow-count">{flow.nodes.length}</strong>
                       </button>
                     ))}
-                    {!visibleFlows.length && <p className="empty">No flows match the current search.</p>}
+                    {!visibleFlows.length && <p className="empty">没有匹配的流程。</p>}
                   </div>
 
                   <section className="quality-panel" style={{ gap: 8 }}>
                     <div className="panel-header compact">
                       <div>
-                        <h3>Health Dock</h3>
-                        <p>{issues.length ? `${issueSummary.error} errors · ${issueSummary.warning} warnings` : "Validation and asset cleanup."}</p>
+                        <h3>问题面板</h3>
+                        <p>{issues.length ? `${issueSummary.error} 个错误 · ${issueSummary.warning} 个警告` : "校验与素材清理入口。"}</p>
                       </div>
                       <div className="toolbar-actions" style={{ gap: 6 }}>
                         <button
@@ -1692,7 +1657,7 @@ export default function App() {
                           onClick={() => void handleValidate()}
                           disabled={!document || busy.validate}
                         >
-                          Validate
+                          校验
                         </button>
                         <button
                           className="ghost-button"
@@ -1700,17 +1665,17 @@ export default function App() {
                           onClick={() => void openUnusedAssetsWorkspace()}
                           disabled={!document || busy.scan}
                         >
-                          Assets
+                          图片
                         </button>
                       </div>
                     </div>
 
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <span className="status-pill tone-warning" style={{ minHeight: 24, padding: "2px 8px", fontSize: 11 }}>
-                        {issueSummary.error + issueSummary.warning || 0} findings
+                        {issueSummary.error + issueSummary.warning || 0} 个待处理
                       </span>
                       <span className="status-pill tone-success" style={{ minHeight: 24, padding: "2px 8px", fontSize: 11 }}>
-                        {unusedImages.length} unused assets
+                        {unusedImages.length} 张未使用图片
                       </span>
                     </div>
 
@@ -1727,221 +1692,186 @@ export default function App() {
                             }
                           }}
                         >
-                          <strong>{issue.severity}</strong>
+                          <strong>{issue.severity === "error" ? "错误" : issue.severity === "warning" ? "警告" : "提示"}</strong>
                           <span>{issue.message}</span>
                         </button>
                       ))}
-                      {issues.length > 3 && <p className="empty">{`+${issues.length - 3} more findings`}</p>}
-                      {!issues.length && <p className="empty">Run validation to populate issues.</p>}
+                      {issues.length > 3 && <p className="empty">{`还有 ${issues.length - 3} 个问题`}</p>}
+                      {!issues.length && <p className="empty">暂无校验问题。</p>}
                     </div>
                   </section>
                 </div>
               )}
             </aside>
 
-            <main className="panel center-column" style={{ padding: density === "compact" ? "12px" : undefined, gap: 10 }}>
+            <main className="panel center-column center-column-compact">
               <div className="workbench-top" style={{ gap: 8 }}>
                 <div className="panel-header compact" style={{ alignItems: "center" }}>
                   <div>
-                    <h2>Node Table</h2>
+                    <h2>节点表</h2>
                     <p>{currentFlowSummary}</p>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <span className="status-pill tone-idle" style={{ minHeight: 26, padding: "3px 9px", fontSize: 11 }}>
-                      {selectedCount} selected
+                      已选 {selectedCount}
                     </span>
                     <span className="status-pill tone-idle" style={{ minHeight: 26, padding: "3px 9px", fontSize: 11 }}>
-                      {visibleNodes.length} visible
-                    </span>
-                    <span className="status-pill tone-idle" style={{ minHeight: 26, padding: "3px 9px", fontSize: 11 }}>
-                      {density === "compact" ? "Dense view" : "Comfort view"}
+                      可见 {visibleNodes.length}
                     </span>
                   </div>
                 </div>
 
-                <div style={{ display: "grid", gap: 8 }}>
-                  <div
-                    className="toolbar-actions"
-                    style={{
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 8,
-                      padding: "8px 10px",
-                      border: "1px solid #edf1ef",
-                      borderRadius: 14,
-                      background: "#f8faf7",
-                    }}
-                  >
+                <div className="toolbar-strip">
+                  <div className="toolbar-actions toolbar-actions-compact">
                     <div style={COMMAND_GROUP_STYLE}>
-                      <span style={COMMAND_LABEL_STYLE}>History</span>
+                      <span style={COMMAND_LABEL_STYLE}>历史</span>
                       <button style={COMPACT_BUTTON_STYLE} onClick={handleUndo} disabled={!canUndoEditorHistory(history)}>
-                        Undo
+                        撤销
                       </button>
                       <button style={COMPACT_BUTTON_STYLE} onClick={handleRedo} disabled={!canRedoEditorHistory(history)}>
-                        Redo
+                        重做
                       </button>
                     </div>
 
                     <div style={COMMAND_GROUP_STYLE}>
-                      <span style={COMMAND_LABEL_STYLE}>Rows</span>
-                      <button style={COMPACT_BUTTON_STYLE} onClick={addNode} disabled={!document}>
-                        Add
+                      <span style={COMMAND_LABEL_STYLE}>节点</span>
+                      <select value={createOperation} onChange={(event) => setCreateOperation(event.target.value)} className="compact-select">
+                        {operationEntries.map(([operation, meta]) => (
+                          <option key={operation} value={operation}>
+                            {meta.label} ({operation})
+                          </option>
+                        ))}
+                      </select>
+                      <button style={COMPACT_BUTTON_STYLE} onClick={() => addNode(createOperation)} disabled={!document}>
+                        新增
                       </button>
                       <button style={COMPACT_BUTTON_STYLE} onClick={deleteNodes} disabled={!document}>
-                        Delete
+                        删除
                       </button>
                       <button style={COMPACT_BUTTON_STYLE} onClick={() => moveSelection(-1)} disabled={!selectedNodeIds.length}>
-                        Up
+                        上移
                       </button>
                       <button style={COMPACT_BUTTON_STYLE} onClick={() => moveSelection(1)} disabled={!selectedNodeIds.length}>
-                        Down
+                        下移
                       </button>
                     </div>
 
                     <div style={COMMAND_GROUP_STYLE}>
-                      <span style={COMMAND_LABEL_STYLE}>Clipboard</span>
+                      <span style={COMMAND_LABEL_STYLE}>剪贴板</span>
                       <button style={COMPACT_BUTTON_STYLE} onClick={() => void copySelection()} disabled={!selectedNodeIds.length}>
-                        Copy
+                        复制
                       </button>
                       <button style={COMPACT_BUTTON_STYLE} onClick={() => void pasteSelection()} disabled={!document}>
-                        Paste
+                        粘贴
                       </button>
                       <button style={COMPACT_BUTTON_STYLE} onClick={() => void openImportDialog()} disabled={!document}>
-                        Import
+                        导入
                       </button>
                     </div>
 
                     <div style={COMMAND_GROUP_STYLE}>
-                      <span style={COMMAND_LABEL_STYLE}>Tools</span>
+                      <span style={COMMAND_LABEL_STYLE}>工具</span>
                       <button style={COMPACT_BUTTON_STYLE} onClick={() => setActiveToolWindow("csv_preview")} disabled={!currentFlow}>
-                        Preview
+                        CSV 预览
                       </button>
                       <button style={COMPACT_BUTTON_STYLE} onClick={() => void openRecordingDialog()} disabled={!document}>
-                        Record
+                        录制模式
                       </button>
                     </div>
-                  </div>
-
-                  <div className="search-block" style={{ gap: 8 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <div className="quick-filters" style={{ gap: 6 }}>
-                        {quickFilters.map((filter) => (
-                          <button
-                            key={filter.operation}
-                            className={searchQuery.trim().toLowerCase() === filter.operation ? "quick-filter active" : "quick-filter"}
-                            style={{ minHeight: 28, padding: "4px 9px", borderRadius: 10, fontSize: 11, fontWeight: 700 }}
-                            onClick={() =>
-                              setSearchQuery((current) => (current.trim().toLowerCase() === filter.operation ? "" : filter.operation))
-                            }
-                          >
-                            {filter.operation.toUpperCase()} · {filter.count}
-                          </button>
-                        ))}
-                      </div>
-                      <span style={COMMAND_LABEL_STYLE}>{flowOperationSummary}</span>
-                    </div>
-
-                    <div className="search-row">
+                    <div className="search-row search-row-compact">
                       <input
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
-                        placeholder="Filter node summaries, targets, branch marks, or notes"
+                        placeholder="搜索目标、摘要、跳转标记、备注"
                         style={{ padding: "8px 10px" }}
                       />
-                      <span className="search-count">{`${selectedCount} selected · ${issues.length} issues`}</span>
+                      <span className="search-count">{`${selectedCount} 已选 · ${issues.length} 个问题`}</span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="node-table-wrap" style={{ borderRadius: 14 }}>
+              <div className="node-table-wrap node-table-wrap-compact" style={{ borderRadius: 14 }}>
                 <table className="node-table" style={{ tableLayout: "fixed" }}>
                   <thead>
                     <tr>
                       <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 40 }}></th>
-                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 54 }}>#</th>
-                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 88 }}>Op</th>
-                      <th style={TABLE_HEADER_CELL_STYLE}>Locator</th>
-                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "17%" }}>Region</th>
-                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "16%" }}>Timing</th>
-                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "16%" }}>Branch</th>
-                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "21%" }}>Summary</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 52 }}>序号</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 96 }}>类型</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "13%" }}>跳转标记</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "23%" }}>目标</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "31%" }}>摘要</th>
+                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "20%" }}>备注</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleNodes.map((node) => (
-                      <tr
-                        key={node.node_id}
-                        className={node.node_id === document?.state.selected_node_id ? "active-row" : ""}
-                        onClick={() => activateNode(node.node_id)}
-                        title={summarizeNode(node)}
-                      >
-                        <td className="checkbox-cell" style={{ ...TABLE_BODY_CELL_STYLE, width: 40 }}>
-                          <input
-                            type="checkbox"
-                            checked={selectedNodeIds.includes(node.node_id)}
-                            onChange={(event) => toggleNodeSelection(node.node_id, event.target.checked)}
-                            onClick={(event) => event.stopPropagation()}
-                          />
-                        </td>
-                        <td style={TABLE_BODY_CELL_STYLE}>
-                          <span className="index-pill" style={{ minWidth: 28, height: 24, fontSize: 11 }}>
-                            {node.index}
-                          </span>
-                        </td>
-                        <td style={TABLE_BODY_CELL_STYLE}>
-                          <span className="op-pill" data-operation={node.operation} style={{ minHeight: 24, fontSize: 11 }}>
-                            {node.operation.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="node-cell" style={TABLE_BODY_CELL_STYLE} title={`${compactLocator(node)} | ${node.param_text || "No param text"}`}>
-                          <span style={TABLE_SINGLE_LINE_STYLE}>{compactLocator(node)}</span>
-                        </td>
-                        <td className="node-cell compact-cell" style={TABLE_BODY_CELL_STYLE} title={compactRegion(node)}>
-                          <span style={TABLE_SINGLE_LINE_STYLE}>{compactRegion(node)}</span>
-                        </td>
-                        <td className="node-cell compact-cell" style={TABLE_BODY_CELL_STYLE} title={compactTiming(node)}>
-                          <span style={TABLE_SINGLE_LINE_STYLE}>{compactTiming(node)}</span>
-                        </td>
-                        <td className="node-cell compact-cell" style={TABLE_BODY_CELL_STYLE} title={compactBranch(node)}>
-                          <span style={TABLE_SINGLE_LINE_STYLE}>{compactBranch(node)}</span>
-                        </td>
-                        <td
-                          className="node-cell summary-cell"
-                          style={TABLE_BODY_CELL_STYLE}
-                          title={`${summarizeNode(node)} | ${compactSummary(node)}`}
+                    {visibleNodes.map((node) => {
+                      const rowView = getNodeRowView(node);
+                      const noteText = node.note || rowView.secondary_text || "-";
+                      const detailText = rowView.timing_text;
+                      return (
+                        <tr
+                          key={node.node_id}
+                          className={node.node_id === document?.state.selected_node_id ? "active-row" : ""}
+                          onClick={() => activateNode(node.node_id)}
+                          title={rowView.summary}
                         >
-                          <span style={TABLE_SINGLE_LINE_STYLE}>{`${summarizeNode(node)} · ${compactSummary(node)}`}</span>
-                        </td>
-                      </tr>
-                    ))}
+                          <td className="checkbox-cell" style={{ ...TABLE_BODY_CELL_STYLE, width: 40 }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedNodeIds.includes(node.node_id)}
+                              onChange={(event) => toggleNodeSelection(node.node_id, event.target.checked)}
+                              onClick={(event) => event.stopPropagation()}
+                            />
+                          </td>
+                          <td style={TABLE_BODY_CELL_STYLE}>
+                            <span className="index-pill" style={{ minWidth: 28, height: 24, fontSize: 11 }}>
+                              {node.index}
+                            </span>
+                          </td>
+                          <td className="node-cell" style={TABLE_BODY_CELL_STYLE} title={`${rowView.operation_label} (${node.operation})`}>
+                            <strong>{rowView.operation_label}</strong>
+                            <span>{node.operation}</span>
+                          </td>
+                          <td className="node-cell" style={TABLE_BODY_CELL_STYLE} title={node.jump_mark || "-"}>
+                            <span style={TABLE_SINGLE_LINE_STYLE}>{node.jump_mark || "-"}</span>
+                          </td>
+                          <td className="node-cell" style={TABLE_BODY_CELL_STYLE} title={`${rowView.locator_text} | ${rowView.region_text}`}>
+                            <strong>{rowView.locator_text}</strong>
+                            <span>{rowView.region_text}</span>
+                          </td>
+                          <td className="node-cell summary-cell" style={TABLE_BODY_CELL_STYLE} title={`${rowView.summary} | ${detailText}`}>
+                            <strong>{rowView.summary}</strong>
+                            <span>{detailText}</span>
+                          </td>
+                          <td className="node-cell" style={TABLE_BODY_CELL_STYLE} title={noteText}>
+                            <span style={TABLE_SINGLE_LINE_STYLE}>{noteText}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {!visibleNodes.length && (
                       <tr>
-                        <td colSpan={8} className="empty">
-                          {document ? "No nodes match the current filter." : "Open a config directory to start editing."}
+                        <td colSpan={7} className="empty">
+                          {document ? "没有匹配当前筛选条件的节点。" : "先打开配置目录后开始编辑。"}
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-
-              <div className="workbench-footer">
-                <span>{`${visibleNodes.length} visible rows · ${totalNodes} total nodes`}</span>
-                <span>{`${selectedCount} selected · ${issues.length} issues · ${unusedImages.length} unused`}</span>
-              </div>
             </main>
 
-            <aside className={`panel right-column ${rightCollapsed ? "collapsed-panel" : ""}`} style={{ padding: density === "compact" ? "12px" : undefined, gap: 10 }}>
+            <aside className={`panel right-column ${rightCollapsed ? "collapsed-panel" : ""}`}>
               <div className="panel-header compact" style={{ alignItems: "center" }}>
                 <div>
-                  <h2>Inspector</h2>
-                  <p>Stable edit pane for the active row.</p>
+                  <h2>节点编辑</h2>
+                  <p>按操作类型展示真正可编辑的 CSV 字段。</p>
                 </div>
                 <div className="panel-header-actions">
                   {activeNode ? (
                     <span className="op-pill" data-operation={activeNode.operation} style={{ minHeight: 24, fontSize: 11 }}>
-                      {activeNode.operation.toUpperCase()}
+                      {activeRowView?.operation_label ?? activeNode.operation}
                     </span>
                   ) : (
                     <span className="panel-count" style={{ minWidth: 34, minHeight: 34, borderRadius: 12 }}>
@@ -1949,194 +1879,259 @@ export default function App() {
                     </span>
                   )}
                   <button className="icon-button" onClick={() => setRightCollapsed((current) => !current)}>
-                    {rightCollapsed ? "Show" : "Hide"}
+                    {rightCollapsed ? "展开" : "收起"}
                   </button>
                 </div>
               </div>
 
               {!rightCollapsed && activeNode ? (
-                <div className="inspector" style={{ gap: 10 }}>
-                  <div className="inspector-hero" style={{ ...DENSE_SECTION_STYLE, position: "sticky", top: 0, zIndex: 1 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                      <strong style={{ marginBottom: 0, fontSize: 15 }}>{summarizeNode(activeNode)}</strong>
-                      <span className="index-pill" style={{ minWidth: 28, height: 24, fontSize: 11 }}>
-                        {activeNode.index}
-                      </span>
-                    </div>
-                    <span title={activeNodeDetail}>{activeNodeDetail}</span>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-                      <span className="status-pill tone-idle" style={{ minHeight: 24, padding: "2px 8px", fontSize: 11 }}>
-                        {activeNode.operation}
-                      </span>
-                      <span className="status-pill tone-idle" style={{ minHeight: 24, padding: "2px 8px", fontSize: 11 }}>
-                        {summarizeBranch(activeNode)}
-                      </span>
-                    </div>
-                  </div>
+                <div className="inspector inspector-compact" style={{ gap: 10 }}>
+                  <section className="inspector-section" style={DENSE_SECTION_STYLE}>
+                    <h3>基础信息</h3>
+                    <div className="field-grid field-grid-tight">
+                      <label>
+                        <span>节点类型</span>
+                        <select value={activeNode.operation} onChange={(event) => changeNodeOperation(event.target.value)}>
+                          {operationEntries.map(([operation, meta]) => (
+                            <option key={operation} value={operation}>
+                              {meta.label} ({operation})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-                    <div className="metric-card" style={{ padding: "10px 12px", borderRadius: 14 }}>
-                      <div className="metric-header">
-                        <span>Confidence</span>
-                        <strong>{activeNode.confidence_text || "0.00"}</strong>
-                      </div>
-                      <div className="confidence-track">
-                        <span style={{ width: `${confidenceValue * 100}%` }} />
-                      </div>
+                      {paramEditorConfig && hasVisibleField(activeNodeMeta, "param_text") && (
+                        <label>
+                          <span>{paramEditorConfig.label}</span>
+                          {paramEditorConfig.kind === "select" ? (
+                            <select value={activeNode.param_text} onChange={(event) => updateNodeField("param_text", event.target.value)}>
+                              {(paramEditorConfig.options ?? []).map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <div className="inline-field">
+                              <input
+                                value={activeNode.param_text}
+                                onChange={(event) => updateNodeField("param_text", event.target.value)}
+                                placeholder={paramEditorConfig.placeholder}
+                                list={paramEditorConfig.kind === "jump-target" ? "jump-target-options" : undefined}
+                              />
+                              {paramEditorConfig.helper === "capture_point" && activeHelpers.includes("capture_point") && (
+                                <button style={COMPACT_BUTTON_STYLE} onClick={() => void captureForNode("point")}>
+                                  取点
+                                </button>
+                              )}
+                              {paramEditorConfig.kind === "jump-target" && (
+                                <datalist id="jump-target-options">
+                                  {jumpTargetOptions.map((option) => (
+                                    <option key={option} value={option} />
+                                  ))}
+                                </datalist>
+                              )}
+                            </div>
+                          )}
+                        </label>
+                      )}
+
+                      {hasVisibleField(activeNodeMeta, "search_target") && (
+                        <label>
+                          <span>{getSearchTargetLabel(activeNode.operation)}</span>
+                          <input
+                            value={activeNode.search_target}
+                            onChange={(event) => updateNodeField("search_target", event.target.value)}
+                            placeholder={activeNode.operation === "pic" ? "图片文件名，如 test.png" : "OCR 目标文本"}
+                          />
+                        </label>
+                      )}
+
+                      {hasVisibleField(activeNodeMeta, "region_text") && (
+                        <label>
+                          <span>搜索区域</span>
+                          <div className="inline-field">
+                            <input
+                              value={activeNode.region_text}
+                              onChange={(event) => updateNodeField("region_text", event.target.value)}
+                              placeholder="x;y;width;height"
+                            />
+                            {(activeHelpers.includes("capture_image_region") || activeHelpers.includes("capture_ocr_region")) && (
+                              <button
+                                style={COMPACT_BUTTON_STYLE}
+                                onClick={() => void captureForNode(activeNode.operation === "ocr" ? "ocr" : "pic")}
+                              >
+                                框选
+                              </button>
+                            )}
+                          </div>
+                        </label>
+                      )}
+
+                      {hasVisibleField(activeNodeMeta, "confidence_text") && (
+                        <label>
+                          <span>识别置信度</span>
+                          <input value={activeNode.confidence_text} onChange={(event) => updateNodeField("confidence_text", event.target.value)} />
+                        </label>
+                      )}
+
+                      {showMoveTimeField && (
+                        <label>
+                          <span>移动用时</span>
+                          <input value={activeNode.move_time} onChange={(event) => updateNodeField("move_time", event.target.value)} />
+                        </label>
+                      )}
+
+                      {hasVisibleField(activeNodeMeta, "jump_mark") && (
+                        <label>
+                          <span>跳转标记</span>
+                          <input value={activeNode.jump_mark} onChange={(event) => updateNodeField("jump_mark", event.target.value)} />
+                        </label>
+                      )}
                     </div>
-                    <div className="metric-card" style={{ padding: "10px 12px", borderRadius: 14 }}>
-                      <div className="metric-header">
-                        <span>Flags</span>
-                        <strong>{activeNode.pic_range_random || activeNode.disable_grayscale ? "custom" : "default"}</strong>
+                  </section>
+
+                  {(showWaitFields || showRetryFields) && (
+                    <section className="inspector-section" style={DENSE_SECTION_STYLE}>
+                      <h3>等待与重试</h3>
+                      <div className="field-grid field-grid-tight">
+                        {showWaitFields && (
+                          <label>
+                            <span>完成后等待</span>
+                            <div className="split-field">
+                              <input value={activeNode.wait_value} onChange={(event) => updateNodeField("wait_value", event.target.value)} placeholder="固定" />
+                              <input value={activeNode.wait_random} onChange={(event) => updateNodeField("wait_random", event.target.value)} placeholder="随机" />
+                            </div>
+                          </label>
+                        )}
+
+                        {showRetryFields && (
+                          <label>
+                            <span>未命中重试</span>
+                            <div className="split-field">
+                              <input value={activeNode.retry_value} onChange={(event) => updateNodeField("retry_value", event.target.value)} placeholder="固定" />
+                              <input value={activeNode.retry_random} onChange={(event) => updateNodeField("retry_random", event.target.value)} placeholder="随机" />
+                            </div>
+                          </label>
+                        )}
                       </div>
-                      <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
-                        <span style={SECONDARY_TEXT_STYLE}>{activeNode.pic_range_random ? "random move on" : "random move off"}</span>
-                        <span style={SECONDARY_TEXT_STYLE}>{activeNode.disable_grayscale ? "grayscale disabled" : "grayscale enabled"}</span>
+                    </section>
+                  )}
+
+                  {showBranchFields && (
+                    <section className="inspector-section" style={DENSE_SECTION_STYLE}>
+                      <h3>分支</h3>
+                      <div className="field-grid field-grid-tight">
+                        <label>
+                          <span>触发条件</span>
+                          <select value={activeNode.branch.trigger} onChange={(event) => updateBranchField("trigger", event.target.value)}>
+                            <option value="none">无（none）</option>
+                            <option value="exist">存在时（exist）</option>
+                            <option value="notExist">不存在时（notExist）</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>分支模式</span>
+                          <select value={activeNode.branch.mode} onChange={(event) => updateBranchField("mode", event.target.value)}>
+                            <option value="none">无（none）</option>
+                            <option value="subflow">子流程（subflow）</option>
+                            <option value="jump_pair">双跳转（jump_pair）</option>
+                          </select>
+                        </label>
+
+                        {activeNode.branch.mode !== "none" && (
+                          <label>
+                            <span>{getBranchPrimaryLabel(activeNode.branch.mode)}</span>
+                            <input
+                              value={activeNode.branch.primary_target}
+                              onChange={(event) => updateBranchField("primary_target", event.target.value)}
+                              list="branch-target-options"
+                            />
+                          </label>
+                        )}
+
+                        {activeNode.branch.mode === "jump_pair" && (
+                          <label>
+                            <span>{getBranchSecondaryLabel(activeNode.branch.mode)}</span>
+                            <input
+                              value={activeNode.branch.secondary_target}
+                              onChange={(event) => updateBranchField("secondary_target", event.target.value)}
+                              list="branch-target-options"
+                            />
+                          </label>
+                        )}
+
+                        <datalist id="branch-target-options">
+                          {branchTargetOptions.map((option) => (
+                            <option key={option} value={option} />
+                          ))}
+                        </datalist>
                       </div>
-                    </div>
-                  </div>
+                    </section>
+                  )}
 
                   <section className="inspector-section" style={DENSE_SECTION_STYLE}>
-                    <h3>Locator</h3>
-                    <div className="field-grid" style={{ gap: 10 }}>
-                      <label>
-                        <span>Operation</span>
-                        <input value={activeNode.operation} onChange={(event) => updateNodeField("operation", event.target.value)} />
-                      </label>
-                      <label>
-                        <span>Search Target</span>
-                        <input value={activeNode.search_target} onChange={(event) => updateNodeField("search_target", event.target.value)} />
-                      </label>
-                      <label className="wide-field">
-                        <span>Param</span>
-                        <div className="inline-field">
-                          <input value={activeNode.param_text} onChange={(event) => updateNodeField("param_text", event.target.value)} />
-                          <button style={COMPACT_BUTTON_STYLE} onClick={() => void captureForNode("point")}>
-                            Pick
-                          </button>
+                    <h3>补充信息</h3>
+                    <div className="field-grid field-grid-tight">
+                      {hasVisibleField(activeNodeMeta, "pic_range_random") && (
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={activeNode.pic_range_random}
+                            onChange={(event) => updateNodeField("pic_range_random", event.target.checked)}
+                          />
+                          <span>命中后随机落点</span>
+                        </label>
+                      )}
+
+                      {hasVisibleField(activeNodeMeta, "disable_grayscale") && (
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={activeNode.disable_grayscale}
+                            onChange={(event) => updateNodeField("disable_grayscale", event.target.checked)}
+                          />
+                          <span>禁用灰度匹配</span>
+                        </label>
+                      )}
+
+                      {hasVisibleField(activeNodeMeta, "note") && (
+                        <label className="wide-field">
+                          <span>备注</span>
+                          <input value={activeNode.note} onChange={(event) => updateNodeField("note", event.target.value)} placeholder="仅供编辑时查看" />
+                        </label>
+                      )}
+                    </div>
+
+                    {(inspectorImage || activeNode.operation === "pic") && (
+                      <div className="preview-card preview-card-compact preview-card-fixed">
+                        <div className="subpanel-head compact">
+                          <div>
+                            <h3>图片预览</h3>
+                            <p>当前 `pic` 节点绑定的图片素材。</p>
+                          </div>
                         </div>
-                      </label>
-                      <label className="wide-field">
-                        <span>Region</span>
-                        <div className="inline-field">
-                          <input value={activeNode.region_text} onChange={(event) => updateNodeField("region_text", event.target.value)} />
+                        {inspectorImage ? (
                           <button
-                            style={COMPACT_BUTTON_STYLE}
-                            onClick={() => void captureForNode(activeNode.operation === "ocr" ? "ocr" : "pic")}
+                            type="button"
+                            className="preview-thumb-button"
+                            onClick={() =>
+                              setImageLightbox({
+                                src: inspectorImage,
+                                title: inspectorImageTitle,
+                              })
+                            }
                           >
-                            Capture
+                            <div className="preview-thumb-frame">
+                              <img src={inspectorImage} alt="当前节点图片预览" />
+                            </div>
+                            <span className="preview-thumb-caption">点击查看大图</span>
                           </button>
-                        </div>
-                      </label>
-                      <label className="wide-field">
-                        <span>Confidence</span>
-                        <input
-                          value={activeNode.confidence_text}
-                          onChange={(event) => updateNodeField("confidence_text", event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  </section>
-
-                  <section className="inspector-section" style={DENSE_SECTION_STYLE}>
-                    <h3>Timing</h3>
-                    <div className="field-grid" style={{ gap: 10 }}>
-                      <label>
-                        <span>Wait</span>
-                        <div className="split-field">
-                          <input value={activeNode.wait_value} onChange={(event) => updateNodeField("wait_value", event.target.value)} />
-                          <input value={activeNode.wait_random} onChange={(event) => updateNodeField("wait_random", event.target.value)} />
-                        </div>
-                      </label>
-                      <label>
-                        <span>Retry</span>
-                        <div className="split-field">
-                          <input value={activeNode.retry_value} onChange={(event) => updateNodeField("retry_value", event.target.value)} />
-                          <input value={activeNode.retry_random} onChange={(event) => updateNodeField("retry_random", event.target.value)} />
-                        </div>
-                      </label>
-                      <label>
-                        <span>Move Time</span>
-                        <input value={activeNode.move_time} onChange={(event) => updateNodeField("move_time", event.target.value)} />
-                      </label>
-                      <label>
-                        <span>Jump Mark</span>
-                        <input value={activeNode.jump_mark} onChange={(event) => updateNodeField("jump_mark", event.target.value)} />
-                      </label>
-                    </div>
-                  </section>
-
-                  <section className="inspector-section" style={DENSE_SECTION_STYLE}>
-                    <h3>Branch</h3>
-                    <div className="field-grid" style={{ gap: 10 }}>
-                      <label>
-                        <span>Branch Trigger</span>
-                        <select value={activeNode.branch.trigger} onChange={(event) => updateBranchField("trigger", event.target.value)}>
-                          <option value="none">none</option>
-                          <option value="exist">exist</option>
-                          <option value="notExist">notExist</option>
-                        </select>
-                      </label>
-                      <label>
-                        <span>Branch Mode</span>
-                        <select value={activeNode.branch.mode} onChange={(event) => updateBranchField("mode", event.target.value)}>
-                          <option value="none">none</option>
-                          <option value="subflow">subflow</option>
-                          <option value="jump_pair">jump_pair</option>
-                        </select>
-                      </label>
-                      <label>
-                        <span>Primary Target</span>
-                        <input
-                          value={activeNode.branch.primary_target}
-                          onChange={(event) => updateBranchField("primary_target", event.target.value)}
-                        />
-                      </label>
-                      <label>
-                        <span>Secondary Target</span>
-                        <input
-                          value={activeNode.branch.secondary_target}
-                          onChange={(event) => updateBranchField("secondary_target", event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  </section>
-
-                  <section className="inspector-section" style={DENSE_SECTION_STYLE}>
-                    <h3>Notes & Preview</h3>
-                    <label className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={activeNode.pic_range_random}
-                        onChange={(event) => updateNodeField("pic_range_random", event.target.checked)}
-                      />
-                      <span>Picture random move</span>
-                    </label>
-                    <label className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={activeNode.disable_grayscale}
-                        onChange={(event) => updateNodeField("disable_grayscale", event.target.checked)}
-                      />
-                      <span>Disable grayscale</span>
-                    </label>
-                    <label>
-                      <span>Note</span>
-                      <textarea
-                        value={activeNode.note}
-                        onChange={(event) => updateNodeField("note", event.target.value)}
-                        style={{ minHeight: 80 }}
-                      />
-                    </label>
-                    <div className="preview-card" style={{ padding: "12px 13px", borderRadius: 14 }}>
-                      <div className="subpanel-head compact">
-                        <div>
-                          <h3>Image Preview</h3>
-                          <p>Screenshot target tied to the selected picture node.</p>
-                        </div>
+                        ) : (
+                          <p className="empty">当前节点暂无可预览图片。</p>
+                        )}
                       </div>
-                      {inspectorImage ? <img src={inspectorImage} alt="Current node target" /> : <p className="empty">No preview available.</p>}
-                    </div>
+                    )}
                   </section>
                 </div>
               ) : !rightCollapsed ? (
@@ -2149,19 +2144,13 @@ export default function App() {
                     color: "#627277",
                   }}
                 >
-                  Select a node to edit its fields.
+                  选择一个节点后在这里编辑对应的 CSV 字段。
                 </div>
               ) : (
-                <p className="empty">Inspector collapsed.</p>
+                <p className="empty">编辑面板已收起。</p>
               )}
             </aside>
           </section>
-
-          <footer className="status-bar" style={{ padding: "10px 14px", borderRadius: 14, fontSize: 12 }}>
-            <span>{`Current config: ${configLabel}`}</span>
-            <span>{`${document?.flows.length ?? 0} flows · ${totalNodes} nodes`}</span>
-            <span>{`${issues.length} issues · ${unusedImages.length} unused images`}</span>
-          </footer>
         </div>
       </div>
 
@@ -2169,12 +2158,12 @@ export default function App() {
         <div className="modal-backdrop">
           <div className="modal">
             <div className="panel-header">
-              <h2>Import Nodes</h2>
-              <button onClick={() => setImportDialog((current) => ({ ...current, open: false }))}>Close</button>
+              <h2>导入节点</h2>
+              <button onClick={() => setImportDialog((current) => ({ ...current, open: false }))}>关闭</button>
             </div>
             <div className="toolbar-actions">
-              <button onClick={() => void chooseImportDirectory()}>Choose Source</button>
-              <span>{importDialog.rootPath || "No source chosen"}</span>
+              <button onClick={() => void chooseImportDirectory()}>选择来源配置</button>
+              <span>{importDialog.rootPath || "尚未选择来源"}</span>
             </div>
             <div className="modal-grid">
               <div className="flow-list">
@@ -2200,9 +2189,9 @@ export default function App() {
                   <thead>
                     <tr>
                       <th></th>
-                      <th>#</th>
-                      <th>Operation</th>
-                      <th>Summary</th>
+                      <th>序号</th>
+                      <th>类型</th>
+                      <th>摘要</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2223,8 +2212,8 @@ export default function App() {
                           />
                         </td>
                         <td>{node.index}</td>
-                        <td>{node.operation}</td>
-                        <td>{summarizeNode(node)}</td>
+                        <td>{getNodeRowView(node).operation_label}</td>
+                        <td>{getNodeRowView(node).summary}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -2233,7 +2222,7 @@ export default function App() {
             </div>
             <div className="toolbar-actions end">
               <button onClick={() => void importSelectedNodes()} disabled={!importDialog.selectedNodeIds.length}>
-                Import Selected
+                导入选中节点
               </button>
             </div>
           </div>
@@ -2245,10 +2234,10 @@ export default function App() {
           <div className="modal wide tool-window">
             <div className="panel-header">
               <div>
-                <h2>CSV Preview</h2>
-                <p>{currentFlow ? `Serialized output for ${currentFlow.filename}` : "No flow selected."}</p>
+                <h2>CSV 原始预览</h2>
+                <p>{currentFlow ? `${currentFlow.filename} 的序列化结果` : "当前未选择流程。"}</p>
               </div>
-              <button onClick={() => setActiveToolWindow("none")}>Close</button>
+              <button onClick={() => setActiveToolWindow("none")}>关闭</button>
             </div>
             <textarea readOnly value={csvPreview} className="preview-text modal-preview-text" />
           </div>
@@ -2260,17 +2249,17 @@ export default function App() {
           <div className="modal wide tool-window">
             <div className="panel-header">
               <div>
-                <h2>Unused Assets</h2>
-                <p>{document ? `Detached screenshots under ${document.root_path}` : "No config loaded."}</p>
+                <h2>未使用图片</h2>
+                <p>{document ? `${document.root_path} 下的未使用截图素材` : "当前未加载配置。"}</p>
               </div>
               <div className="toolbar-actions">
                 <button className="ghost-button" onClick={() => void handleScanImages()} disabled={!document || busy.scan}>
-                  Rescan
+                  重新扫描
                 </button>
                 <button onClick={() => void deleteSelectedUnusedImages()} disabled={!selectedUnusedImageNames.length || busy.delete_unused}>
-                  Delete Selected
+                  删除选中
                 </button>
-                <button onClick={() => setActiveToolWindow("none")}>Close</button>
+                <button onClick={() => setActiveToolWindow("none")}>关闭</button>
               </div>
             </div>
             <div className="asset-workspace">
@@ -2296,17 +2285,17 @@ export default function App() {
                     </button>
                   </label>
                 ))}
-                {!unusedImages.length && <p className="empty">Run asset scan to populate this workspace.</p>}
+                {!unusedImages.length && <p className="empty">请先扫描未使用图片。</p>}
               </div>
               <div className="asset-preview-panel">
                 <div className="subpanel-head compact">
                   <div>
-                    <h3>Preview</h3>
-                    <p>{selectedUnusedImageNames.length} selected</p>
+                    <h3>图片预览</h3>
+                    <p>已选 {selectedUnusedImageNames.length} 张</p>
                   </div>
                 </div>
                 <div className="image-preview large-preview">
-                  {previewImageUrl ? <img src={previewImageUrl} alt="Unused asset preview" /> : <p className="empty">No image selected.</p>}
+                  {previewImageUrl ? <img src={previewImageUrl} alt="未使用图片预览" /> : <p className="empty">尚未选择图片。</p>}
                 </div>
               </div>
             </div>
@@ -2318,14 +2307,14 @@ export default function App() {
         <div className="modal-backdrop">
           <div className="modal wide">
             <div className="panel-header">
-              <h2>Recording Workflow</h2>
+              <h2>录制工作流</h2>
               <button onClick={closeRecordingDialog} disabled={recordingSessionActive}>
-                Close
+                关闭
               </button>
             </div>
             <div className="recording-controls">
               <label>
-                <span>Mode</span>
+                <span>模式</span>
                 <select
                   value={recordingDialog.coordinateMode}
                   onChange={(event) =>
@@ -2335,12 +2324,12 @@ export default function App() {
                     }))
                   }
                 >
-                  <option value="screen">screen</option>
-                  <option value="window">window</option>
+                  <option value="screen">屏幕坐标（screen）</option>
+                  <option value="window">窗口坐标（window）</option>
                 </select>
               </label>
               <label>
-                <span>Window</span>
+                <span>窗口</span>
                 <select
                   value={recordingDialog.selectedWindowHwnd}
                   onChange={(event) =>
@@ -2350,7 +2339,7 @@ export default function App() {
                     }))
                   }
                 >
-                  <option value="">None</option>
+                  <option value="">无</option>
                   {recordingDialog.windows.map((windowOption) => (
                     <option key={windowOption.hwnd} value={String(windowOption.hwnd)}>
                       {windowOption.display_text ?? `${windowOption.title} | ${windowOption.process_name}`}
@@ -2369,90 +2358,56 @@ export default function App() {
                     }))
                   }
                 />
-                <span>Match child window</span>
+                <span>匹配子窗口</span>
               </label>
               <button onClick={() => void startRecording()} disabled={recordingDialog.session?.status === "recording"}>
-                Start
+                开始
               </button>
               <button
                 onClick={() => void toggleRecordingPaused(recordingDialog.session?.status !== "paused")}
                 disabled={!recordingDialog.session || !["recording", "paused"].includes(recordingDialog.session.status)}
               >
-                {recordingDialog.session?.status === "paused" ? "Resume" : "Pause"}
+                {recordingDialog.session?.status === "paused" ? "继续" : "暂停"}
               </button>
               <button
                 onClick={() => void stopRecording()}
                 disabled={!recordingDialog.session || !["recording", "paused"].includes(recordingDialog.session.status)}
               >
-                Stop
+                停止
               </button>
               <span className="status-pill tone-idle">
-                {recordingDialog.session ? `${recordingDialog.session.status} · ${recordingDialog.session.buffered_event_count} events` : "idle"}
+                {recordingDialog.session ? `${recordingDialog.session.status} · ${recordingDialog.session.buffered_event_count} 条事件` : "空闲"}
               </span>
               {recordingDialog.session && (
                 <span className="status-pill tone-idle">
-                  {recordingDialog.session.coordinate_mode} · child {recordingDialog.session.match_child_window ? "on" : "off"}
+                  {recordingDialog.session.coordinate_mode} · 子窗口 {recordingDialog.session.match_child_window ? "开" : "关"}
                 </span>
               )}
               {recordingDialog.session && (
                 <span className="status-pill tone-idle">
-                  overlay {recordingDialog.session.overlay_visible ? "on" : "off"} · ignore {recordingDialog.session.ignored_region_count ?? 0}
+                  浮窗 {recordingDialog.session.overlay_visible ? "显示" : "隐藏"} · 忽略区 {recordingDialog.session.ignored_region_count ?? 0}
                 </span>
               )}
               {recordingDialog.session?.assistant_suppressing_events && (
-                <span className="status-pill tone-warning">assistant suppressing input</span>
+                <span className="status-pill tone-warning">浮窗正在抑制输入记录</span>
               )}
               {recordingDialog.session?.message && <span className="status-pill tone-idle">{recordingDialog.session.message}</span>}
             </div>
             <div className="recording-controls">
-              <label>
-                <span>Mark Kind</span>
-                <select
-                  value={recordingDialog.markKind}
-                  onChange={(event) =>
-                    setRecordingDialog((current) => ({
-                      ...current,
-                      markKind: event.target.value as "pic" | "ocr",
-                    }))
-                  }
-                >
-                  <option value="pic">pic</option>
-                  <option value="ocr">ocr</option>
-                </select>
-              </label>
-              <label>
-                <span>Action</span>
-                <select
-                  value={recordingDialog.markAction}
-                  onChange={(event) =>
-                    setRecordingDialog((current) => ({
-                      ...current,
-                      markAction: event.target.value as "locate" | "wait_exist" | "wait_not_exist",
-                    }))
-                  }
-                >
-                  <option value="locate">locate</option>
-                  <option value="wait_exist">wait_exist</option>
-                  <option value="wait_not_exist">wait_not_exist</option>
-                </select>
-              </label>
-              <button onClick={() => void addRecordingVisualMark()} disabled={recordingDialog.session?.status !== "recording"}>
-                Add Visual Mark
-              </button>
               <button onClick={() => void copyRecordedNodes()} disabled={!recordingDialog.recordedNodes.length}>
-                Copy Selected
+                复制选中
               </button>
               <button onClick={insertRecordedNodes} disabled={!recordingDialog.recordedNodes.length}>
-                Insert Recorded Nodes
+                插入录制节点
               </button>
             </div>
             {recordingDialog.summary && (
               <div className="recording-summary">
-                <span>{`total ${recordingDialog.summary.total}`}</span>
-                <span>{`visual ${recordingDialog.summary.visual_count}`}</span>
-                <span>{`wait ${recordingDialog.summary.wait_count}`}</span>
-                <span>{`locator ${recordingDialog.summary.locator_count}`}</span>
-                <span>{`input ${recordingDialog.summary.input_count}`}</span>
+                <span>{`总计 ${recordingDialog.summary.total}`}</span>
+                <span>{`识别 ${recordingDialog.summary.visual_count}`}</span>
+                <span>{`等待 ${recordingDialog.summary.wait_count}`}</span>
+                <span>{`定位 ${recordingDialog.summary.locator_count}`}</span>
+                <span>{`输入 ${recordingDialog.summary.input_count}`}</span>
               </div>
             )}
             <div className="node-table-wrap">
@@ -2460,13 +2415,13 @@ export default function App() {
                 <thead>
                   <tr>
                     <th></th>
-                    <th>#</th>
-                    <th>Source</th>
-                    <th>Semantic</th>
-                    <th>Operation</th>
-                    <th>Target</th>
-                    <th>Region</th>
-                    <th>Strategy</th>
+                    <th>序号</th>
+                    <th>来源</th>
+                    <th>语义</th>
+                    <th>操作</th>
+                    <th>目标</th>
+                    <th>区域</th>
+                    <th>策略</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2482,7 +2437,7 @@ export default function App() {
                         />
                       </td>
                       <td>{node.index}</td>
-                      <td>{review?.source ?? "event"}</td>
+                      <td>{review?.source ?? "事件"}</td>
                       <td>{review?.semantic ?? summarizeNode(node)}</td>
                       <td>{node.operation}</td>
                       <td>{review?.target_text || node.search_target || node.param_text}</td>
@@ -2494,7 +2449,7 @@ export default function App() {
                   {!recordingDialog.recordedNodes.length && (
                     <tr>
                       <td colSpan={8} className="empty">
-                        Start a session, stop it, then insert the generated nodes.
+                        开始录制并停止后，这里会显示生成的节点。
                       </td>
                     </tr>
                   )}
@@ -2510,10 +2465,10 @@ export default function App() {
           <div className="modal">
             <div className="panel-header">
               <div>
-                <h2>OCR Candidates</h2>
-                <p>Choose the text that should be written back to the editor workflow.</p>
+                <h2>OCR 候选文本</h2>
+                <p>选择要回填到当前节点中的 OCR 文本。</p>
               </div>
-              <button onClick={() => setOcrCandidateDialog(EMPTY_OCR_CANDIDATE_DIALOG)}>Close</button>
+              <button onClick={() => setOcrCandidateDialog(EMPTY_OCR_CANDIDATE_DIALOG)}>关闭</button>
             </div>
             <div className="flow-list">
               {ocrCandidateDialog.candidates.map((candidate) => (
@@ -2532,7 +2487,7 @@ export default function App() {
               ))}
             </div>
             <label>
-              <span>Selected text</span>
+              <span>最终写入文本</span>
               <input
                 value={ocrCandidateDialog.selected}
                 onChange={(event) => setOcrCandidateDialog((current) => ({ ...current, selected: event.target.value }))}
@@ -2540,9 +2495,26 @@ export default function App() {
             </label>
             <div className="toolbar-actions end">
               <button className="ghost-button" onClick={() => setOcrCandidateDialog(EMPTY_OCR_CANDIDATE_DIALOG)}>
-                Cancel
+                取消
               </button>
-              <button onClick={confirmOcrCandidateDialog}>Apply</button>
+              <button onClick={confirmOcrCandidateDialog}>应用</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {imageLightbox && (
+        <div className="modal-backdrop image-lightbox-backdrop" onClick={() => setImageLightbox(null)}>
+          <div className="image-lightbox" onClick={(event) => event.stopPropagation()}>
+            <div className="panel-header">
+              <div>
+                <h2>图片查看</h2>
+                <p>{imageLightbox.title}</p>
+              </div>
+              <button onClick={() => setImageLightbox(null)}>关闭</button>
+            </div>
+            <div className="image-lightbox-stage">
+              <img src={imageLightbox.src} alt={imageLightbox.title} />
             </div>
           </div>
         </div>

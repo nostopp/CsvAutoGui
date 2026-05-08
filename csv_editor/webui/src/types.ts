@@ -21,6 +21,72 @@ export type BranchConfigDTO = {
   secondary_target: string;
 };
 
+export type OperationVisibleField =
+  | "param_text"
+  | "wait"
+  | "wait_value"
+  | "wait_random"
+  | "search_target"
+  | "region_text"
+  | "confidence_text"
+  | "retry"
+  | "retry_value"
+  | "retry_random"
+  | "pic_range_random"
+  | "move_time"
+  | "jump_mark"
+  | "disable_grayscale"
+  | "note"
+  | "branch"
+  | "branch.trigger"
+  | "branch.mode"
+  | "branch.primary_target"
+  | "branch.secondary_target";
+
+export type OperationHelper =
+  | "capture_point"
+  | "capture_image_region"
+  | "capture_ocr_region"
+  | "select_ocr_candidate";
+
+export type OperationMetaDTO = {
+  label: string;
+  category: string;
+  category_label: string;
+  visible_fields: OperationVisibleField[];
+  allowed_helpers: OperationHelper[];
+};
+
+export type OperationFieldMetaDTO = {
+  label: string;
+};
+
+export type OperationHelperMetaDTO = {
+  label: string;
+  capability: string;
+  target_fields: string[];
+};
+
+export type OperationMetadataDTO = {
+  version: number;
+  fields: Record<string, OperationFieldMetaDTO>;
+  helpers: Record<OperationHelper, OperationHelperMetaDTO>;
+  operations: Record<string, OperationMetaDTO>;
+};
+
+export type NodeRowViewDTO = {
+  operation_label: string;
+  category: string;
+  category_label: string;
+  summary: string;
+  secondary_text: string;
+  locator_text: string;
+  region_text: string;
+  timing_text: string;
+  branch_text: string;
+  search_text: string;
+};
+
 export type OperationNodeDTO = {
   node_id: string;
   index: number;
@@ -40,6 +106,7 @@ export type OperationNodeDTO = {
   note: string;
   branch: BranchConfigDTO;
   raw_extra: Record<string, string>;
+  row_view?: NodeRowViewDTO;
 };
 
 export type FlowDocumentDTO = {
@@ -96,6 +163,7 @@ export type BootstrapDTO = {
   initial_root_path: string | null;
   frontend_entry?: string | null;
   operation_types?: string[];
+  operation_metadata?: OperationMetadataDTO;
   capabilities?: Record<string, boolean>;
   supports_native_capture?: boolean;
   supports_recording?: boolean;

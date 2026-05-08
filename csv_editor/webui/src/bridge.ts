@@ -41,7 +41,10 @@ type ApiName =
   | "stop_recording"
   | "copy_recorded_nodes"
   | "list_visible_windows"
-  | "add_visual_mark";
+  | "add_visual_mark"
+  | "minimize_window"
+  | "toggle_maximize_window"
+  | "close_window";
 
 function notImplemented(name: string): ApiResult<never> {
   return {
@@ -91,7 +94,7 @@ export const bridge = {
     callApi<ValidationIssueDTO[]>("validate_document", document),
   listExternalFlows: (rootPath: string) =>
     callApi<ExternalFlowSummaryDTO[]>("list_external_flows", rootPath),
-  importNodes: (payload: { root_path: string; flow_name: string; node_ids: string[] }) =>
+  importNodes: (payload: { root_path: string; flow_name: string; node_ids?: string[]; node_indexes?: number[] }) =>
     callApi<OperationNodeDTO[]>("import_nodes", payload),
   scanUnusedImages: (rootPath: string) =>
     callApi<UnusedImageDTO[]>("scan_unused_images", rootPath),
@@ -117,4 +120,7 @@ export const bridge = {
     callApi<null>("copy_recorded_nodes", payload),
   addVisualMark: (payload: Record<string, unknown>) =>
     callApi<RecordingSessionDTO>("add_visual_mark", payload),
+  minimizeWindow: () => callApi<null>("minimize_window"),
+  toggleMaximizeWindow: () => callApi<{ maximized: boolean }>("toggle_maximize_window"),
+  closeWindow: () => callApi<null>("close_window"),
 };

@@ -16,6 +16,7 @@ from csv_editor.io.editor_state import EditorStateRepository
 from csv_editor.io.assets import save_capture_image
 from csv_editor.io.node_clipboard import (
     CLIPBOARD_TEXT_PREFIX,
+    NodeClipboardPayload,
     build_clipboard_payload,
     deserialize_clipboard_payload,
     serialize_clipboard_payload,
@@ -31,6 +32,7 @@ from csv_editor.services.recording import (
     build_recording_summary,
     list_visible_windows,
 )
+from csv_editor.services.summary import build_operation_metadata
 from csv_editor.services.validation import validate_document as validate_editor_document
 
 from .api_models import ApiResult
@@ -48,6 +50,8 @@ from .dto import (
 )
 from .recording_assistant import (
     COMMAND_CLOSE_ATTEMPT,
+    COMMAND_DRAG_BEGIN,
+    COMMAND_DRAG_END,
     COMMAND_MARK,
     COMMAND_PAUSE,
     COMMAND_RESUME,
@@ -56,6 +60,8 @@ from .recording_assistant import (
     AssistantRect,
     NativeRecordingAssistant,
 )
+
+WINDOW_HIDE_SETTLE_SECONDS = 0.28
 
 
 @dataclass(slots=True)
@@ -86,6 +92,7 @@ class EditorBridgeApi:
         self._codec = codec or CsvEditorCodec()
         self._state_repo = state_repo or EditorStateRepository(enabled=True)
         self._clipboard = clipboard or SystemClipboard()
+        self._editor_clipboard_payload: NodeClipboardPayload | None = None
         self._window: Any | None = None
         self._ocr_preview = RuntimeOcrPreviewAdapter()
         self._recording_session: RecordingSession | None = None
@@ -95,11 +102,26 @@ class EditorBridgeApi:
         self._completed_recording: CompletedRecordingResult | None = None
         self._recording_assistant: NativeRecordingAssistant | None = None
         self._recording_window_hidden = False
+        self._assistant_drag_restore_paused: bool | None = None
+        self._window_is_maximized = False
 
     def set_window(self, window: Any) -> None:
         self._window = window
+        self._window_is_maximized = bool(getattr(window, "maximized", False))
+        events = getattr(window, "events", None)
+        if events is None:
+            return
+        try:
+            events.maximized += lambda *_args: self._set_window_maximized(True)
+            events.restored += lambda *_args: self._set_window_maximized(False)
+        except Exception:
+            pass
+
+    def _set_window_maximized(self, is_maximized: bool) -> None:
+        self._window_is_maximized = bool(is_maximized)
 
     def get_bootstrap(self) -> dict[str, object]:
+        operation_metadata = build_operation_metadata()
         return ApiResult.success(
             {
                 "app_name": self._app_name,
@@ -107,6 +129,8 @@ class EditorBridgeApi:
                 "platform": sys.platform,
                 "initial_root_path": str(self._initial_root_path) if self._initial_root_path else None,
                 "frontend_entry": self._frontend_entry,
+                "operation_types": list((operation_metadata.get("operations") or {}).keys()),
+                "operation_metadata": operation_metadata,
                 "capabilities": {
                     "choose_config_directory": True,
                     "document_bridge": True,
@@ -121,6 +145,7 @@ class EditorBridgeApi:
                     "copy_recorded_nodes": True,
                     "list_visible_windows": True,
                     "add_visual_mark": True,
+                    "window_controls": True,
                 },
             }
         ).to_dict()
@@ -193,6 +218,11 @@ class EditorBridgeApi:
         flow_name = str(data.get("flow_name") or data.get("flowName") or "")
         node_ids_raw = data.get("node_ids") or data.get("nodeIds") or []
         node_ids = [str(node_id) for node_id in node_ids_raw if str(node_id)]
+        node_indexes_raw = data.get("node_indexes") or data.get("nodeIndexes") or []
+        try:
+            node_indexes = [int(node_index) for node_index in node_indexes_raw if str(node_index).strip()]
+        except (TypeError, ValueError):
+            return ApiResult.failure("validation_error", "node_indexes must contain integers").to_dict()
 
         if not flow_name:
             return ApiResult.failure("validation_error", "flow_name is required").to_dict()
@@ -203,7 +233,7 @@ class EditorBridgeApi:
             flow = document.get_flow(flow_name)
             if flow is None:
                 return ApiResult.failure("validation_error", f"Flow not found: {flow_name}").to_dict()
-            nodes = self._select_import_nodes(flow, node_ids)
+            nodes = self._select_import_nodes(flow, node_ids, node_indexes)
             return ApiResult.success([operation_node_to_dict(node) for node in nodes]).to_dict()
         except FileNotFoundError:
             return ApiResult.failure("config_not_found", f"Config directory not found: {root_path_raw}").to_dict()
@@ -271,19 +301,27 @@ class EditorBridgeApi:
         try:
             raw_text = self._clipboard.read_text()
         except ClipboardUnavailableError as exc:
+            if self._editor_clipboard_payload is not None:
+                return ApiResult.success(node_clipboard_payload_to_dict(self._editor_clipboard_payload)).to_dict()
             return ApiResult.failure("clipboard_unavailable", "Clipboard is unavailable", {"reason": str(exc)}).to_dict()
         payload = deserialize_clipboard_payload(raw_text or "")
         if payload is None:
+            if self._editor_clipboard_payload is not None:
+                return ApiResult.success(node_clipboard_payload_to_dict(self._editor_clipboard_payload)).to_dict()
             return ApiResult.success(None).to_dict()
+        self._editor_clipboard_payload = payload
         return ApiResult.success(node_clipboard_payload_to_dict(payload)).to_dict()
 
     def write_clipboard_nodes(self, payload: object) -> dict[str, object]:
         try:
             clipboard_payload = node_clipboard_payload_from_dict(payload)
             raw_text = serialize_clipboard_payload(clipboard_payload)
+            self._editor_clipboard_payload = clipboard_payload
             self._clipboard.write_text(f"{CLIPBOARD_TEXT_PREFIX}{raw_text}")
             return ApiResult.success(None).to_dict()
         except ClipboardUnavailableError as exc:
+            if self._editor_clipboard_payload is not None:
+                return ApiResult.success(None).to_dict()
             return ApiResult.failure("clipboard_unavailable", "Clipboard is unavailable", {"reason": str(exc)}).to_dict()
         except Exception as exc:
             return ApiResult.failure("validation_error", f"Invalid clipboard payload: {exc}").to_dict()
@@ -338,6 +376,45 @@ class EditorBridgeApi:
         if captured is None:
             return ApiResult.success(None).to_dict()
         return ApiResult.success({"x": captured.x, "y": captured.y, "point_text": captured.point_text}).to_dict()
+
+    def minimize_window(self) -> dict[str, object]:
+        if self._window is None:
+            return ApiResult.failure("io_error", "Main window is unavailable").to_dict()
+        minimize = getattr(self._window, "minimize", None)
+        if not callable(minimize):
+            return ApiResult.failure("io_error", "Main window does not support minimize").to_dict()
+        minimize()
+        return ApiResult.success(None).to_dict()
+
+    def toggle_maximize_window(self) -> dict[str, object]:
+        if self._window is None:
+            return ApiResult.failure("io_error", "Main window is unavailable").to_dict()
+        if self._window_is_maximized:
+            restore = getattr(self._window, "restore", None)
+            if not callable(restore):
+                return ApiResult.failure("io_error", "Main window does not support restore").to_dict()
+            restore()
+            self._window_is_maximized = False
+        else:
+            maximize = getattr(self._window, "maximize", None)
+            if not callable(maximize):
+                return ApiResult.failure("io_error", "Main window does not support maximize").to_dict()
+            maximize()
+            self._window_is_maximized = True
+        return ApiResult.success({"maximized": self._window_is_maximized}).to_dict()
+
+    def close_window(self) -> dict[str, object]:
+        if self._window is None:
+            return ApiResult.failure("io_error", "Main window is unavailable").to_dict()
+        try:
+            self._teardown_recording_assistant()
+        except Exception:
+            pass
+        destroy = getattr(self._window, "destroy", None)
+        if not callable(destroy):
+            return ApiResult.failure("io_error", "Main window does not support close").to_dict()
+        destroy()
+        return ApiResult.success(None).to_dict()
 
     def start_recording(self, input: object) -> dict[str, object]:
         self._finalize_pending_recording_session()
@@ -443,8 +520,11 @@ class EditorBridgeApi:
         try:
             payload = build_clipboard_payload(completed.source_root, completed.source_flow, nodes)
             raw_text = serialize_clipboard_payload(payload)
+            self._editor_clipboard_payload = payload
             self._clipboard.write_text(f"{CLIPBOARD_TEXT_PREFIX}{raw_text}")
         except ClipboardUnavailableError as exc:
+            if self._editor_clipboard_payload is not None:
+                return ApiResult.success(None).to_dict()
             return ApiResult.failure("clipboard_unavailable", "Clipboard is unavailable", {"reason": str(exc)}).to_dict()
         return ApiResult.success(None).to_dict()
 
@@ -501,7 +581,10 @@ class EditorBridgeApi:
         except ImportError:
             return None
 
-        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        dialog_type = getattr(getattr(webview, "FileDialog", None), "FOLDER", None)
+        if dialog_type is None:
+            dialog_type = webview.FOLDER_DIALOG
+        result = self._window.create_file_dialog(dialog_type)
         if not result:
             return None
         if isinstance(result, (list, tuple)):
@@ -586,17 +669,26 @@ class EditorBridgeApi:
             raise ValueError(f"Invalid image name: {image_name}") from exc
         return candidate
 
-    def _select_import_nodes(self, flow: FlowDocument, node_ids: list[str]) -> list[OperationNode]:
-        if not node_ids:
+    def _select_import_nodes(self, flow: FlowDocument, node_ids: list[str], node_indexes: list[int]) -> list[OperationNode]:
+        selected_nodes: list[OperationNode]
+        if node_indexes:
+            by_index = {node.index: node for node in flow.nodes}
+            missing_indexes = [str(node_index) for node_index in node_indexes if node_index not in by_index]
+            if missing_indexes:
+                raise ValueError(f"Unknown node indexes: {', '.join(missing_indexes)}")
+            selected_nodes = [by_index[node_index] for node_index in node_indexes]
+        elif node_ids:
+            by_id = {node.node_id: node for node in flow.nodes}
+            missing = [node_id for node_id in node_ids if node_id not in by_id]
+            if missing:
+                raise ValueError(f"Unknown node ids: {', '.join(missing)}")
+            selected_nodes = [by_id[node_id] for node_id in node_ids]
+        else:
             return []
-        by_id = {node.node_id: node for node in flow.nodes}
-        missing = [node_id for node_id in node_ids if node_id not in by_id]
-        if missing:
-            raise ValueError(f"Unknown node ids: {', '.join(missing)}")
 
         imported: list[OperationNode] = []
-        for index, node_id in enumerate(node_ids, start=1):
-            clone = by_id[node_id].clone()
+        for index, node in enumerate(selected_nodes, start=1):
+            clone = node.clone()
             clone.node_id = uuid4().hex
             clone.index = index
             imported.append(clone)
@@ -709,6 +801,7 @@ class EditorBridgeApi:
             nodes=[node.clone() for node in nodes],
             response_payload=response_payload,
         )
+        self._assistant_drag_restore_paused = None
         self._teardown_recording_assistant()
         self._restore_recording_window()
         self._recording_session = None
@@ -731,6 +824,7 @@ class EditorBridgeApi:
     def _teardown_recording_assistant(self) -> None:
         assistant = self._recording_assistant
         self._recording_assistant = None
+        self._assistant_drag_restore_paused = None
         if assistant is None:
             return
         try:
@@ -745,7 +839,7 @@ class EditorBridgeApi:
         if callable(hide):
             hide()
             self._recording_window_hidden = True
-            time.sleep(0.15)
+            time.sleep(WINDOW_HIDE_SETTLE_SECONDS)
 
     def _restore_recording_window(self) -> None:
         if self._window is None or not self._recording_window_hidden:
@@ -779,6 +873,12 @@ class EditorBridgeApi:
             return
         if command.name == COMMAND_CLOSE_ATTEMPT:
             self._sync_recording_assistant("Stop recording before closing the assistant.", close_protected=True)
+            return
+        if command.name == COMMAND_DRAG_BEGIN:
+            self._handle_assistant_drag_changed(True)
+            return
+        if command.name == COMMAND_DRAG_END:
+            self._handle_assistant_drag_changed(False)
 
     def _handle_assistant_pause_changed(self, paused: bool) -> None:
         session = self._recording_session
@@ -793,6 +893,24 @@ class EditorBridgeApi:
             return
         self._sync_recording_assistant("Stopping...", close_protected=False)
         self._complete_recording_session(session_id, stop_reason="assistant_stop")
+
+    def _handle_assistant_drag_changed(self, dragging: bool) -> None:
+        session = self._recording_session
+        if session is None:
+            self._assistant_drag_restore_paused = None
+            return
+        if dragging:
+            if self._assistant_drag_restore_paused is None:
+                self._assistant_drag_restore_paused = session.get_state().capture_paused
+                if not self._assistant_drag_restore_paused:
+                    session.set_capture_paused(True)
+            return
+
+        restore_paused = self._assistant_drag_restore_paused
+        self._assistant_drag_restore_paused = None
+        session.suppress_events_for(0.15)
+        if restore_paused is False:
+            session.set_capture_paused(False)
 
     def _handle_assistant_geometry_changed(self, rect: AssistantRect | None) -> None:
         session = self._recording_session
@@ -825,7 +943,7 @@ class EditorBridgeApi:
         prompt = f"{kind.upper()} {action}: capture target region"
         try:
             if assistant is not None:
-                captured = assistant.run_hidden(native_capture_region, prompt=prompt)
+                captured = assistant.capture_region(prompt=prompt)
             else:
                 captured = native_capture_region(prompt=prompt)
             if captured is not None:
@@ -1022,7 +1140,7 @@ class EditorBridgeApi:
             if callable(hide):
                 hide()
                 self._hidden = True
-                time.sleep(0.15)
+                time.sleep(WINDOW_HIDE_SETTLE_SECONDS)
 
         def __exit__(self, exc_type, exc, tb) -> None:
             if self._window is None or not self._hidden:

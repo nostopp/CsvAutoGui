@@ -6,12 +6,14 @@ from pathlib import Path
 from csv_editor.domain.enums import BranchMode, BranchTrigger, ValidationSeverity
 from csv_editor.domain.models import BranchConfig, EditorDocument, EditorState, FlowDocument, OperationNode, ValidationIssue
 from csv_editor.io.node_clipboard import NodeClipboardPayload
+from csv_editor.services.summary import build_node_row_view
 
 JsonDict = dict[str, object]
 ApiResultDTO = JsonDict
 BootstrapDTO = JsonDict
 BranchConfigDTO = JsonDict
 OperationNodeDTO = JsonDict
+NodeRowViewDTO = JsonDict
 FlowDocumentDTO = JsonDict
 EditorDocumentDTO = JsonDict
 ValidationIssueDTO = JsonDict
@@ -62,6 +64,7 @@ def operation_node_to_dict(node: OperationNode) -> JsonDict:
         "note": node.note,
         "branch": branch_config_to_dict(node.branch),
         "raw_extra": {str(key): str(value) for key, value in node.raw_extra.items()},
+        "row_view": node_row_view_to_dict(build_node_row_view(node)),
     }
 
 
@@ -188,6 +191,22 @@ def node_clipboard_payload_from_dict(payload: object) -> NodeClipboardPayload:
 def save_document_result_to_dict(document: EditorDocument) -> JsonDict:
     return {
         "document": editor_document_to_dict(document),
+    }
+
+
+def node_row_view_to_dict(view: object) -> JsonDict:
+    data = _as_mapping(view)
+    return {
+        "operation_label": _as_str(data.get("operation_label")),
+        "category": _as_str(data.get("category")),
+        "category_label": _as_str(data.get("category_label")),
+        "summary": _as_str(data.get("summary")),
+        "secondary_text": _as_str(data.get("secondary_text")),
+        "locator_text": _as_str(data.get("locator_text")),
+        "region_text": _as_str(data.get("region_text")),
+        "timing_text": _as_str(data.get("timing_text")),
+        "branch_text": _as_str(data.get("branch_text")),
+        "search_text": _as_str(data.get("search_text")),
     }
 
 

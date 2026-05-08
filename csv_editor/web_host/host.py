@@ -33,6 +33,8 @@ class WebHostApp:
             sys.stderr.write(f"{exc}\n")
             return 1
 
+        webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True
+
         frontend_entry = self._resolve_frontend_entry()
         bridge = EditorBridgeApi(
             initial_root_path=self._config.initial_root_path,
@@ -72,8 +74,20 @@ class WebHostApp:
 
     def _build_window_options(self, frontend_entry: str | None) -> dict[str, Any]:
         if frontend_entry:
-            return {"url": frontend_entry}
-        return {"html": _placeholder_html(self._config.title, self._config.initial_root_path)}
+            return {
+                "url": frontend_entry,
+                "frameless": True,
+                "easy_drag": False,
+                "shadow": True,
+                "background_color": "#DDE4EC",
+            }
+        return {
+            "html": _placeholder_html(self._config.title, self._config.initial_root_path),
+            "frameless": True,
+            "easy_drag": False,
+            "shadow": True,
+            "background_color": "#DDE4EC",
+        }
 
 
 def _placeholder_html(title: str, initial_root_path: Path | None) -> str:
