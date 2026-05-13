@@ -389,6 +389,7 @@ class BackGroundInput(BaseInput):
             if self._click_move_cursor:
                 origin_cursor_pos = win32api.GetCursorPos()
                 target_cursor_pos = win32gui.ClientToScreen(self._hwnd, (self._mouse_x, self._mouse_y))
+                ctypes.windll.user32.BlockInput(True)
                 win32api.SetCursorPos(target_cursor_pos)
             self.mouseDown(button)
             time.sleep(PRESS_TIME)
@@ -397,6 +398,7 @@ class BackGroundInput(BaseInput):
             if origin_cursor_pos is not None:
                 time.sleep(PRESS_TIME)
                 win32api.SetCursorPos(origin_cursor_pos)
+                ctypes.windll.user32.BlockInput(False)
 
     @_multiWindowCheck
     def _postMouseDown(self, button=PRIMARY):
