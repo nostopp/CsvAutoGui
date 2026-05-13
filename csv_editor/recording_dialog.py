@@ -622,10 +622,11 @@ class RecordingPalette(QDialog):
         self.setWindowTitle("录制模式")
         self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         self.setWindowOpacity(PALETTE_IDLE_OPACITY)
-        self.setFixedWidth(210)
+        self.setFixedWidth(240)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
 
         self.status_label = QLabel("录制中")
         self.status_label.setWordWrap(True)
@@ -633,22 +634,27 @@ class RecordingPalette(QDialog):
         layout.addWidget(self.status_label)
 
         first_mark_row = QHBoxLayout()
+        first_mark_row.setSpacing(4)
         first_mark_row.addWidget(self._mark_button("OCR出现", VisualMarkKind.OCR, VisualMarkAction.WAIT_EXIST))
         first_mark_row.addWidget(self._mark_button("OCR消失", VisualMarkKind.OCR, VisualMarkAction.WAIT_NOT_EXIST))
         first_mark_row.addWidget(self._mark_button("OCR定位", VisualMarkKind.OCR, VisualMarkAction.LOCATE))
         layout.addLayout(first_mark_row)
 
         second_mark_row = QHBoxLayout()
+        second_mark_row.setSpacing(4)
         second_mark_row.addWidget(self._mark_button("PIC出现", VisualMarkKind.PIC, VisualMarkAction.WAIT_EXIST))
         second_mark_row.addWidget(self._mark_button("PIC消失", VisualMarkKind.PIC, VisualMarkAction.WAIT_NOT_EXIST))
         second_mark_row.addWidget(self._mark_button("PIC定位", VisualMarkKind.PIC, VisualMarkAction.LOCATE))
         layout.addLayout(second_mark_row)
 
         button_row = QHBoxLayout()
+        button_row.setSpacing(4)
         self.pause_button = QPushButton("暂停")
+        self.pause_button.setObjectName("paletteButton")
         self.pause_button.setCheckable(True)
         self.pause_button.toggled.connect(self._toggle_pause)
         stop_button = QPushButton("停止")
+        stop_button.setObjectName("paletteButton")
         stop_button.clicked.connect(self.stop_requested.emit)
         button_row.addWidget(self.pause_button)
         button_row.addWidget(stop_button)
@@ -661,6 +667,7 @@ class RecordingPalette(QDialog):
 
     def _mark_button(self, text: str, kind: str, action: str) -> QPushButton:
         button = QPushButton(text)
+        button.setObjectName("paletteButton")
         button.clicked.connect(
             lambda _checked=False, mark_kind=kind, mark_action=action: self.mark_requested.emit(
                 mark_kind,

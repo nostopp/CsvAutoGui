@@ -47,3 +47,16 @@ def _summarize_detect(label: str, node: OperationNode) -> str:
         f"{label}判断 {target} -> {node.branch.trigger.value} 时到 {node.branch.primary_target}，"
         f"否则到 {node.branch.secondary_target or '(未设置)'}"
     )
+
+
+def summarize_node_timing(node: OperationNode) -> str:
+    parts = [f"等待时间{node.wait_value.strip() or '0'}"]
+    if node.wait_random.strip():
+        parts.append(f"等待随机{node.wait_random.strip()}")
+
+    if node.operation in {OperationType.PIC.value, OperationType.OCR.value}:
+        parts.append(f"重试时间{node.retry_value.strip() or '0'}")
+        if node.retry_random.strip():
+            parts.append(f"重试随机{node.retry_random.strip()}")
+
+    return " · ".join(parts)

@@ -3,8 +3,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QFont, QGuiApplication, QIcon, QKeySequence, QPixmap, QShortcut, QUndoStack
+from PySide6.QtCore import QMimeData, QRect, QSize, Qt, Signal
+from PySide6.QtGui import QAction, QBrush, QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHeaderView,
     QHBoxLayout,
@@ -29,7 +30,9 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
-    QTabWidget,
+    QStyle,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QTreeWidget,
@@ -56,7 +59,7 @@ from csv_editor.io.node_clipboard import (
 from csv_editor.recording_dialog import RecordingDialog
 from csv_editor.services.capture import capture_point, capture_region
 from csv_editor.services.asset_usage import find_unused_images
-from csv_editor.services.summary import summarize_node
+from csv_editor.services.summary import summarize_node, summarize_node_timing
 from csv_editor.services.validation import validate_document
 from csv_editor.undo_commands import DeleteNodeCommand, InsertNodeCommand, MoveNodeCommand, UpdateNodeCommand
 
@@ -64,8 +67,86 @@ CAPTURE_HIDE_DELAY_SECONDS = 0.2
 NODE_ID_ROLE = Qt.UserRole
 TARGET_ROLE = Qt.UserRole + 1
 UNUSED_IMAGE_NAME_ROLE = Qt.UserRole + 2
+ISSUE_ROLE = Qt.UserRole + 3
+SUMMARY_TITLE_ROLE = Qt.UserRole + 4
+SUMMARY_DETAIL_ROLE = Qt.UserRole + 5
 UNUSED_IMAGE_THUMBNAIL_SIZE = QSize(128, 96)
 UNUSED_IMAGE_GRID_SIZE = QSize(168, 148)
+
+
+class SummaryItemDelegate(QStyledItemDelegate):
+    _PADDING_X = 8
+    _PADDING_Y = 4
+    _DETAIL_SPACING = 2
+
+    def _detail_font(self, option: QStyleOptionViewItem) -> QFont:
+        detail_font = QFont(option.font)
+        detail_font.setPointSizeF(max(7.5, option.font.pointSizeF() - 1.5))
+        return detail_font
+
+    def _text_rect(self, option: QStyleOptionViewItem) -> QRect:
+        return option.rect.adjusted(self._PADDING_X, self._PADDING_Y, -self._PADDING_X, -self._PADDING_Y)
+
+    def _detail_height(self, option: QStyleOptionViewItem, index, detail_font: QFont) -> int:
+        detail = str(index.data(SUMMARY_DETAIL_ROLE) or "")
+        if not detail:
+            return 0
+        widget = option.widget
+        available_width = self._text_rect(option).width()
+        if widget is not None and hasattr(widget, "columnWidth"):
+            available_width = max(available_width, widget.columnWidth(index.column()) - self._PADDING_X * 2)
+        if available_width <= 0:
+            return 0
+        detail_metrics = QFontMetrics(detail_font)
+        detail_rect = detail_metrics.boundingRect(QRect(0, 0, available_width, 0), Qt.TextWordWrap, detail)
+        return detail_rect.height()
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        display_option = QStyleOptionViewItem(option)
+        self.initStyleOption(display_option, index)
+        display_option.text = ""
+        style = display_option.widget.style() if display_option.widget is not None else None
+        if style is not None:
+            style.drawControl(QStyle.CE_ItemViewItem, display_option, painter, display_option.widget)
+
+        title = str(index.data(SUMMARY_TITLE_ROLE) or index.data(Qt.DisplayRole) or "")
+        detail = str(index.data(SUMMARY_DETAIL_ROLE) or "")
+        text_rect = option.rect.adjusted(8, 4, -8, -4)
+        if text_rect.width() <= 0 or text_rect.height() <= 0:
+            return
+
+        painter.save()
+        title_font = QFont(option.font)
+        detail_font = self._detail_font(option)
+
+        is_selected = bool(option.state & QStyle.State_Selected)
+        title_color = option.palette.color(QPalette.HighlightedText if is_selected else QPalette.Text)
+        detail_color = QColor("#35516d" if is_selected else "#637588")
+
+        painter.setPen(title_color)
+        painter.setFont(title_font)
+        title_metrics = painter.fontMetrics()
+        title_text = title_metrics.elidedText(title, Qt.ElideRight, text_rect.width())
+        title_height = title_metrics.height()
+        painter.drawText(text_rect.adjusted(0, 0, 0, -title_metrics.descent()), Qt.AlignLeft | Qt.AlignTop, title_text)
+
+        if detail:
+            painter.setPen(detail_color)
+            painter.setFont(detail_font)
+            detail_rect = text_rect.adjusted(0, title_height + self._DETAIL_SPACING, 0, 0)
+            painter.drawText(detail_rect, Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, detail)
+        painter.restore()
+
+    def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
+        title_font = QFont(option.font)
+        detail_font = self._detail_font(option)
+        title_metrics = QFontMetrics(title_font)
+        height = title_metrics.height() + self._PADDING_Y * 2
+        detail_height = self._detail_height(option, index, detail_font)
+        if detail_height:
+            height += detail_height + self._DETAIL_SPACING
+        base_size = super().sizeHint(option, index)
+        return QSize(base_size.width(), max(base_size.height(), height))
 
 
 class EditorMainWindow(QMainWindow):
@@ -85,6 +166,7 @@ class EditorMainWindow(QMainWindow):
         self._title_base = "CsvAutoGui Editor"
         self.setWindowTitle(f"{self._title_base}[*]")
         self.resize(1400, 900)
+        self.setObjectName("editorWindow")
 
         self._build_actions()
         self._build_ui()
@@ -139,6 +221,10 @@ class EditorMainWindow(QMainWindow):
         tools_menu.addAction(self.show_csv_preview_action)
 
         toolbar = self.addToolBar("编辑")
+        toolbar.setObjectName("mainToolbar")
+        toolbar.setMovable(False)
+        toolbar.setFloatable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonTextOnly)
         toolbar.addAction(self.open_action)
         toolbar.addAction(self.save_action)
         toolbar.addAction(self.undo_action)
@@ -147,34 +233,36 @@ class EditorMainWindow(QMainWindow):
         toolbar.addAction(self.record_nodes_action)
         toolbar.addAction(self.scan_unused_images_action)
         toolbar.addAction(self.show_csv_preview_action)
-        toolbar.addSeparator()
-        toolbar.addAction(self.add_node_action)
-        toolbar.addAction(self.copy_nodes_action)
-        toolbar.addAction(self.paste_nodes_action)
-        toolbar.addAction(self.delete_node_action)
-        toolbar.addAction(self.move_up_action)
-        toolbar.addAction(self.move_down_action)
 
         root = QWidget()
+        root.setObjectName("editorRoot")
         root_layout = QVBoxLayout(root)
         root_layout.setContentsMargins(6, 6, 6, 6)
 
         body_splitter = QSplitter(Qt.Horizontal)
+        body_splitter.setHandleWidth(8)
         root_layout.addWidget(body_splitter, 1)
 
         left_splitter = QSplitter(Qt.Vertical)
         left_splitter.setMinimumWidth(220)
+        left_splitter.setHandleWidth(8)
         body_splitter.addWidget(left_splitter)
 
         self.flow_tree = QTreeWidget()
+        self.flow_tree.setObjectName("flowTree")
         self.flow_tree.setHeaderLabels(["流程文件"])
+        self.flow_tree.setIndentation(16)
         left_splitter.addWidget(self.flow_tree)
 
         validation_panel = QWidget()
+        validation_panel.setObjectName("validationPanel")
         validation_layout = QVBoxLayout(validation_panel)
         validation_layout.setContentsMargins(0, 4, 0, 0)
-        validation_layout.addWidget(QLabel("校验问题"))
+        validation_title = QLabel("校验问题")
+        validation_title.setObjectName("panelTitle")
+        validation_layout.addWidget(validation_title)
         self.validation_list = QListWidget()
+        self.validation_list.setObjectName("validationList")
         validation_layout.addWidget(self.validation_list, 1)
         left_splitter.addWidget(validation_panel)
         left_splitter.setStretchFactor(0, 4)
@@ -182,26 +270,30 @@ class EditorMainWindow(QMainWindow):
         left_splitter.setSizes([600, 170])
 
         content_splitter = QSplitter(Qt.Horizontal)
+        content_splitter.setHandleWidth(8)
         body_splitter.addWidget(content_splitter)
         body_splitter.setStretchFactor(0, 0)
         body_splitter.setStretchFactor(1, 1)
         body_splitter.setSizes([250, 1150])
 
-        self.view_tabs = QTabWidget()
-        content_splitter.addWidget(self.view_tabs)
         content_splitter.setStretchFactor(0, 2)
 
         self.node_table = NodeTableWidget(0, 6)
+        self.node_table.setObjectName("nodeTable")
         self.node_table.setHorizontalHeaderLabels(["序号", "类型", "跳转标记", "目标", "摘要", "备注"])
         self.node_table.verticalHeader().setVisible(False)
         self.node_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.node_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.node_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.node_table.setAlternatingRowColors(True)
+        self.node_table.setShowGrid(False)
+        self.node_table.setItemDelegateForColumn(4, SummaryItemDelegate(self.node_table))
         self._configure_node_table_columns()
         self.node_table.setMinimumWidth(520)
-        self.view_tabs.addTab(self.node_table, "列表")
+        content_splitter.addWidget(self.node_table)
 
         self.inspector = NodeInspector()
+        self.inspector.setObjectName("nodeInspector")
         content_splitter.addWidget(self.inspector)
         content_splitter.setStretchFactor(1, 0)
         content_splitter.setSizes([980, 300])
@@ -352,7 +444,11 @@ class EditorMainWindow(QMainWindow):
             type_item = QTableWidgetItem(node.operation)
             jump_mark_item = QTableWidgetItem(node.jump_mark)
             target_item = QTableWidgetItem(self._format_target_references(node))
-            summary_item = QTableWidgetItem(summarize_node(node))
+            summary_title = summarize_node(node)
+            summary_detail = summarize_node_timing(node)
+            summary_item = QTableWidgetItem(summary_title)
+            summary_item.setData(SUMMARY_TITLE_ROLE, summary_title)
+            summary_item.setData(SUMMARY_DETAIL_ROLE, summary_detail)
             note_item = QTableWidgetItem(node.note)
             for item in [index_item, type_item, jump_mark_item, target_item, summary_item, note_item]:
                 item.setData(NODE_ID_ROLE, node.node_id)
@@ -367,8 +463,13 @@ class EditorMainWindow(QMainWindow):
                 target_item.setToolTip(f"{target_item.text()}\n{target_tip}")
             elif target_item.text():
                 target_item.setToolTip(target_item.text())
-            summary_item.setToolTip(summarize_node(node))
-            self._apply_node_table_style(node, issue_node_ids, [index_item, type_item, jump_mark_item, target_item, summary_item, note_item])
+            summary_item.setToolTip(f"{summary_title}\n{summary_detail}")
+            self._apply_node_table_style(
+                node,
+                issue_node_ids,
+                [index_item, type_item, jump_mark_item, target_item, summary_item, note_item],
+                selected=False,
+            )
             self.node_table.setItem(row, 0, index_item)
             self.node_table.setItem(row, 1, type_item)
             self.node_table.setItem(row, 2, jump_mark_item)
@@ -385,6 +486,7 @@ class EditorMainWindow(QMainWindow):
         self._configure_node_table_columns()
         self.node_table.resizeRowsToContents()
         self.node_table.blockSignals(False)
+        self._refresh_node_table_selection_styles()
         self.inspector.set_node(self.current_node)
 
     def _refresh_preview(self) -> None:
@@ -475,11 +577,23 @@ class EditorMainWindow(QMainWindow):
         node: OperationNode,
         issue_node_ids: set[str],
         items: list[QTableWidgetItem],
+        *,
+        selected: bool,
     ) -> None:
+        is_issue = node.node_id in issue_node_ids
+        selected_row_bg = QColor("#dbeeff")
+        issue_row_bg = QColor("#fff1f2")
+        normal_text = QColor("#18222d")
+
+        for item in items:
+            item.setData(ISSUE_ROLE, is_issue)
+            item.setForeground(QBrush(normal_text))
+            item.setBackground(QBrush(selected_row_bg if selected else issue_row_bg if is_issue else QColor("transparent")))
+
         color = _operation_color(node.operation)
         type_item = items[1]
-        type_item.setBackground(QBrush(color.lighter(175)))
-        type_item.setForeground(QBrush(color.darker(170)))
+        type_item.setBackground(QBrush(color.lighter(155 if selected else 175)))
+        type_item.setForeground(QBrush(color.darker(185)))
         type_font = QFont(type_item.font())
         type_font.setBold(True)
         type_item.setFont(type_font)
@@ -498,10 +612,25 @@ class EditorMainWindow(QMainWindow):
             target_font.setBold(True)
             target_item.setFont(target_font)
 
-        if node.node_id in issue_node_ids:
-            for item in items:
-                item.setBackground(QBrush(QColor("#fff1f2")))
-            items[4].setForeground(QBrush(QColor("#b91c1c")))
+        if is_issue:
+            items[4].setForeground(QBrush(QColor("#b91c1c" if not selected else "#8a1c36")))
+
+    def _refresh_node_table_selection_styles(self) -> None:
+        flow = self.current_flow
+        if not flow:
+            return
+        issue_node_ids = {issue.node_id for issue in self.issues if issue.flow_name == flow.filename and issue.node_id}
+        selected_rows = set(self._selected_row_indexes(self.node_table))
+        for row, node in enumerate(flow.nodes):
+            items = [self.node_table.item(row, column) for column in range(self.node_table.columnCount())]
+            if any(item is None for item in items):
+                continue
+            self._apply_node_table_style(
+                node,
+                issue_node_ids,
+                [item for item in items if item is not None],
+                selected=row in selected_rows,
+            )
 
     def _on_flow_selection_changed(self) -> None:
         selected = self.flow_tree.selectedItems()
@@ -522,9 +651,11 @@ class EditorMainWindow(QMainWindow):
         flow = self.current_flow
         if current_row < 0 or not flow or current_row >= len(flow.nodes):
             self.current_node_id = None
+            self._refresh_node_table_selection_styles()
             self.inspector.set_node(None)
             return
         self.current_node_id = flow.nodes[current_row].node_id
+        self._refresh_node_table_selection_styles()
         self.inspector.set_node(flow.nodes[current_row])
 
     def _on_node_table_item_activated(self, item: QTableWidgetItem) -> None:
@@ -973,6 +1104,8 @@ class ExternalNodeImportDialog(QDialog):
         self.node_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.node_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.node_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.node_table.setAlternatingRowColors(True)
+        self.node_table.setShowGrid(False)
         self.node_table.horizontalHeader().setStretchLastSection(True)
         splitter.addWidget(self.node_table)
         splitter.setStretchFactor(1, 1)
@@ -1290,7 +1423,6 @@ class PicInlinePreviewLabel(QLabel):
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self.setScaledContents(False)
-        self.setStyleSheet("QLabel#picInlinePreview { border: 1px solid #d4d4d8; color: #71717a; }")
         self._set_status("未设置图片文件")
 
     @property
@@ -1422,7 +1554,8 @@ class NodeInspector(QWidget):
         self.panel = QWidget()
         self.scroll.setWidget(self.panel)
         self.layout = QVBoxLayout(self.panel)
-        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setContentsMargins(6, 6, 6, 6)
+        self.layout.setSpacing(8)
         self.layout.setAlignment(Qt.AlignTop)
         self.layout.addWidget(QLabel("请选择一个节点"))
 
@@ -1478,30 +1611,33 @@ class NodeInspector(QWidget):
 
         node = self._current_node
         if node is None:
-            self.layout.addWidget(QLabel("请选择一个节点"))
+            empty = QLabel("请选择一个节点")
+            empty.setObjectName("panelTitle")
+            self.layout.addWidget(empty)
             self._building = False
             return
 
         title = QLabel(f"节点 #{node.index} - {node.operation}")
-        title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        title.setObjectName("inspectorTitle")
         self.layout.addWidget(title)
 
         common_group = QGroupBox("通用属性")
-        common_form = QFormLayout(common_group)
+        common_form = self._create_compact_form(common_group)
         operation_combo = QComboBox()
         self._normalize_combo(operation_combo)
+        operation_combo.setObjectName("compactFieldCombo")
         for item in OperationType:
             operation_combo.addItem(item.value)
         operation_combo.setCurrentText(node.operation)
         operation_combo.currentTextChanged.connect(self._emit_change)
         self._widgets["operation"] = operation_combo
-        common_form.addRow("操作类型", operation_combo)
+        self._add_grid_field(common_form, 0, 0, "操作类型", operation_combo)
 
-        self._widgets["jump_mark"] = self._line_edit(common_form, "跳转标记", node.jump_mark)
-        self._widgets["wait_value"] = self._line_edit(common_form, "等待时间", node.wait_value)
-        self._widgets["wait_random"] = self._line_edit(common_form, "等待随机", node.wait_random)
-        self._widgets["move_time"] = self._line_edit(common_form, "移动用时", node.move_time)
-        self._widgets["note"] = self._line_edit(common_form, "备注", node.note)
+        self._widgets["jump_mark"] = self._line_edit(common_form, 0, 1, "跳转标记", node.jump_mark)
+        self._widgets["wait_value"] = self._line_edit(common_form, 1, 0, "等待时间", node.wait_value)
+        self._widgets["wait_random"] = self._line_edit(common_form, 1, 1, "等待随机", node.wait_random)
+        self._widgets["move_time"] = self._line_edit(common_form, 2, 0, "移动用时", node.move_time)
+        self._widgets["note"] = self._line_edit(common_form, 2, 1, "备注", node.note)
         self.layout.addWidget(common_group)
 
         self.layout.addWidget(self._build_operation_group(node))
@@ -1511,7 +1647,7 @@ class NodeInspector(QWidget):
     def _build_operation_group(self, node: OperationNode) -> QWidget:
         operation = node.operation
         group = QGroupBox("操作属性")
-        form = QFormLayout(group)
+        form = self._create_compact_form(group)
 
         if operation in {
             OperationType.CLICK.value,
@@ -1520,12 +1656,13 @@ class NodeInspector(QWidget):
         }:
             combo = QComboBox()
             self._normalize_combo(combo)
+            combo.setObjectName("compactFieldCombo")
             for button in ["left", "middle", "right", "x1", "x2"]:
                 combo.addItem(button)
             combo.setCurrentText(node.param_text or "left")
             combo.currentTextChanged.connect(self._emit_change)
             self._widgets["param_text"] = combo
-            form.addRow("按钮", combo)
+            self._add_grid_field(form, 0, 0, "按钮", combo, span=2)
             return group
 
         if operation in {
@@ -1546,64 +1683,67 @@ class NodeInspector(QWidget):
             elif operation == OperationType.JUMP.value:
                 label = "跳转目标"
             if operation == OperationType.MOVE_TO.value:
-                self._widgets["param_text"] = self._line_with_button(form, label, node.param_text, "取点", "pick_point")
+                self._widgets["param_text"] = self._line_with_button(form, 0, 0, label, node.param_text, "取点", "pick_point")
             elif operation == OperationType.JUMP.value:
-                self._widgets["param_text"] = self._editable_combo(form, label, node.param_text, self._jump_target_options)
+                self._widgets["param_text"] = self._editable_combo(form, 0, 0, label, node.param_text, self._jump_target_options, span=2)
             else:
-                self._widgets["param_text"] = self._line_edit(form, label, node.param_text)
+                self._widgets["param_text"] = self._line_edit(form, 0, 0, label, node.param_text, span=2)
             return group
 
         if operation in {OperationType.PIC.value, OperationType.OCR.value}:
             target_label = "图片文件" if operation == OperationType.PIC.value else "OCR 文本"
-            self._widgets["search_target"] = self._line_edit(form, target_label, node.search_target)
-            self._widgets["region_text"] = self._line_edit(form, "搜索区域", node.region_text)
-            self._widgets["confidence_text"] = self._line_edit(form, "置信度", node.confidence_text)
-            self._widgets["retry_value"] = self._line_edit(form, "重试时间", node.retry_value)
-            self._widgets["retry_random"] = self._line_edit(form, "重试随机", node.retry_random)
+            self._widgets["search_target"] = self._line_edit(form, 0, 0, target_label, node.search_target)
+            self._widgets["region_text"] = self._line_edit(form, 0, 1, "搜索区域", node.region_text)
+            self._widgets["confidence_text"] = self._line_edit(form, 1, 0, "置信度", node.confidence_text)
+            self._widgets["retry_value"] = self._line_edit(form, 1, 1, "重试时间", node.retry_value)
+            self._widgets["retry_random"] = self._line_edit(form, 2, 0, "重试随机", node.retry_random)
 
             random_checkbox = QCheckBox()
             random_checkbox.setChecked(node.pic_range_random)
             random_checkbox.stateChanged.connect(self._emit_change)
             self._widgets["pic_range_random"] = random_checkbox
-            form.addRow("随机命中位置", random_checkbox)
+            self._add_grid_field(form, 2, 1, "随机命中位置", random_checkbox)
 
             if operation == OperationType.PIC.value:
                 grayscale_checkbox = QCheckBox()
                 grayscale_checkbox.setChecked(node.disable_grayscale)
                 grayscale_checkbox.stateChanged.connect(self._emit_change)
                 self._widgets["disable_grayscale"] = grayscale_checkbox
-                form.addRow("禁用灰度匹配", grayscale_checkbox)
-                form.addRow("辅助采集", self._action_button("截图并回填", "capture_pic"))
+                self._add_grid_field(form, 3, 0, "禁用灰度匹配", grayscale_checkbox)
+                self._add_grid_field(form, 3, 1, "辅助采集", self._action_button("截图并回填", "capture_pic"))
             else:
-                form.addRow("辅助采集", self._action_button("框选 OCR 区域", "capture_ocr"))
+                self._add_grid_field(form, 3, 0, "辅助采集", self._action_button("框选 OCR 区域", "capture_ocr"), span=2)
 
             branch_group = QGroupBox("分支")
-            branch_form = QFormLayout(branch_group)
+            branch_form = self._create_compact_form(branch_group)
             trigger_combo = QComboBox()
             self._normalize_combo(trigger_combo)
+            trigger_combo.setObjectName("compactFieldCombo")
             for item in [BranchTrigger.NONE.value, BranchTrigger.EXIST.value, BranchTrigger.NOT_EXIST.value]:
                 trigger_combo.addItem(item)
             trigger_combo.setCurrentText(node.branch.trigger.value)
             trigger_combo.currentTextChanged.connect(self._emit_change)
             self._widgets["branch_trigger"] = trigger_combo
-            branch_form.addRow("触发条件", trigger_combo)
+            self._add_grid_field(branch_form, 0, 0, "触发条件", trigger_combo)
 
             mode_combo = QComboBox()
             self._normalize_combo(mode_combo)
+            mode_combo.setObjectName("compactFieldCombo")
             for item in [BranchMode.NONE.value, BranchMode.SUBFLOW.value, BranchMode.JUMP_PAIR.value]:
                 mode_combo.addItem(item)
             mode_combo.setCurrentText(node.branch.mode.value)
             mode_combo.currentTextChanged.connect(self._emit_change)
             self._widgets["branch_mode"] = mode_combo
-            branch_form.addRow("分支模式", mode_combo)
+            self._add_grid_field(branch_form, 0, 1, "分支模式", mode_combo)
 
             branch_options = list(dict.fromkeys(self._subflow_options + self._jump_target_options))
-            self._widgets["branch_primary_target"] = self._editable_combo(branch_form, "主目标", node.branch.primary_target, branch_options)
-            self._widgets["branch_secondary_target"] = self._editable_combo(branch_form, "次目标", node.branch.secondary_target, branch_options)
+            self._widgets["branch_primary_target"] = self._editable_combo(branch_form, 1, 0, "主目标", node.branch.primary_target, branch_options, span=2)
+            self._widgets["branch_secondary_target"] = self._editable_combo(branch_form, 2, 0, "次目标", node.branch.secondary_target, branch_options, span=2)
 
             container = QWidget()
             container_layout = QVBoxLayout(container)
             container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(8)
             container_layout.addWidget(group)
             container_layout.addWidget(branch_group)
             if operation == OperationType.PIC.value:
@@ -1614,19 +1754,55 @@ class NodeInspector(QWidget):
                 container_layout.addWidget(preview)
             return container
 
-        form.addRow("说明", QLabel("当前操作暂未配置专门表单"))
+        self._add_grid_field(form, 0, 0, "说明", QLabel("当前操作暂未配置专门表单"), span=2)
         return group
 
-    def _line_edit(self, form: QFormLayout, label: str, value: str) -> QLineEdit:
+    def _create_compact_form(self, parent: QWidget) -> QGridLayout:
+        grid = QGridLayout(parent)
+        grid.setContentsMargins(10, 12, 10, 10)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(6)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        return grid
+
+    def _create_field_label(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("fieldLabel")
+        return label
+
+    def _add_grid_field(self, form: QGridLayout, row: int, column: int, label: str, widget: QWidget, *, span: int = 1) -> None:
+        container = QWidget()
+        container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.addWidget(self._create_field_label(label))
+        layout.addWidget(widget)
+        form.addWidget(container, row, column, 1, span)
+
+    def _line_edit(self, form: QGridLayout, row: int, column: int, label: str, value: str, *, span: int = 1) -> QLineEdit:
         edit = QLineEdit(value)
         self._normalize_field(edit)
+        edit.setObjectName("compactFieldInput")
         edit.editingFinished.connect(self._emit_change)
-        form.addRow(label, edit)
+        self._add_grid_field(form, row, column, label, edit, span=span)
         return edit
 
-    def _editable_combo(self, form: QFormLayout, label: str, value: str, options: list[str]) -> QComboBox:
+    def _editable_combo(
+        self,
+        form: QGridLayout,
+        row: int,
+        column: int,
+        label: str,
+        value: str,
+        options: list[str],
+        *,
+        span: int = 1,
+    ) -> QComboBox:
         combo = QComboBox()
         self._normalize_combo(combo)
+        combo.setObjectName("compactFieldCombo")
         combo.setEditable(True)
         combo.addItems(options)
         combo.setCurrentText(value)
@@ -1634,35 +1810,48 @@ class NodeInspector(QWidget):
         line_edit = combo.lineEdit()
         if line_edit is not None:
             line_edit.editingFinished.connect(self._emit_change)
-        form.addRow(label, combo)
+        self._add_grid_field(form, row, column, label, combo, span=span)
         return combo
 
-    def _line_with_button(self, form: QFormLayout, label: str, value: str, button_text: str, action: str) -> QLineEdit:
+    def _line_with_button(
+        self,
+        form: QGridLayout,
+        row: int,
+        column: int,
+        label: str,
+        value: str,
+        button_text: str,
+        action: str,
+    ) -> QLineEdit:
         edit = QLineEdit(value)
         self._normalize_field(edit)
+        edit.setObjectName("compactFieldInput")
         edit.editingFinished.connect(self._emit_change)
         button = QPushButton(button_text)
+        button.setObjectName("compactFieldButton")
         button.clicked.connect(lambda: self._request_action(action))
-        row = QWidget()
-        layout = QHBoxLayout(row)
+        container = QWidget()
+        layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
         layout.addWidget(edit, 1)
         layout.addWidget(button)
-        form.addRow(label, row)
+        self._add_grid_field(form, row, column, label, container, span=2)
         return edit
 
     def _normalize_field(self, widget: QWidget) -> None:
         widget.setMinimumWidth(0)
-        widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def _normalize_combo(self, combo: QComboBox) -> None:
         combo.setMinimumWidth(0)
-        combo.setMinimumContentsLength(1)
-        combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        combo.setMinimumContentsLength(6)
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
+        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def _action_button(self, text: str, action: str) -> QPushButton:
         button = QPushButton(text)
+        button.setObjectName("compactFieldButton")
         button.clicked.connect(lambda: self._request_action(action))
         return button
 

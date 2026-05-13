@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from .main_window import EditorMainWindow
+from .theme import apply_editor_theme
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -24,6 +25,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     app = QApplication(sys.argv if argv is None else ["csv_editor", *argv])
+    apply_editor_theme(app)
     window = EditorMainWindow()
     if args.config:
         window.open_config_folder(Path(args.config))
