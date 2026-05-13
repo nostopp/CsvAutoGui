@@ -17,6 +17,10 @@ CAPTURE_SETTLE_DELAY_SECONDS = 0.24
 MAGNIFIER_SOURCE_SIZE = 22
 MAGNIFIER_PANEL_SIZE = 176
 MAGNIFIER_MARGIN = 18
+MAGNIFIER_TITLE_HEIGHT = 22
+CURSOR_LABEL_PAD_X = 8
+CURSOR_LABEL_PAD_Y = 5
+HUD_STACK_GAP = 6
 
 
 @dataclass(slots=True)
@@ -48,6 +52,37 @@ class _VirtualScreenGeometry:
     top: int
     width: int
     height: int
+
+
+def _resolve_follow_anchor(
+    *,
+    pointer_x: int,
+    pointer_y: int,
+    overlay_width: int,
+    overlay_height: int,
+    screen_width: int,
+    screen_height: int,
+    gap: int = MAGNIFIER_MARGIN,
+) -> tuple[int, int]:
+    max_left = max(0, screen_width - overlay_width)
+    max_top = max(0, screen_height - overlay_height)
+
+    show_right = pointer_x + gap + overlay_width <= screen_width
+    show_below = pointer_y + gap + overlay_height <= screen_height
+
+    if show_right:
+        left = pointer_x + gap
+    else:
+        left = pointer_x - gap - overlay_width
+
+    if show_below:
+        top = pointer_y + gap
+    else:
+        top = pointer_y - gap - overlay_height
+
+    left = min(max(left, 0), max_left)
+    top = min(max(top, 0), max_top)
+    return left, top
 
 
 def capture_region(parent: object | None = None, prompt: str = "") -> CapturedRegion | None:
@@ -143,7 +178,7 @@ class _CaptureOverlay:
         )
         self._magnifier_cross_h = self._canvas.create_line(0, 0, 0, 0, fill="#ffcc4d", width=1)
         self._magnifier_cross_v = self._canvas.create_line(0, 0, 0, 0, fill="#ffcc4d", width=1)
-        self._position_magnifier()
+        self._position_magnifier(MAGNIFIER_MARGIN, MAGNIFIER_MARGIN)
 
         self._prompt_items = _draw_prompt(self._canvas, self.prompt)
         self._selection_rect = self._canvas.create_rectangle(
@@ -215,15 +250,14 @@ class _CaptureOverlay:
                 self._root.destroy()
 
     def _on_motion(self, event) -> None:
-        self._update_cursor_label(int(event.x), int(event.y))
-        self._update_magnifier(int(event.x), int(event.y))
+        self._update_follow_hud(int(event.x), int(event.y))
 
     def _on_button_press(self, event) -> None:
         local_x = int(event.x)
         local_y = int(event.y)
         self._selection_start = (local_x, local_y)
         self._selection_end = (local_x, local_y)
-        self._update_magnifier(local_x, local_y)
+        self._update_follow_hud(local_x, local_y)
         if self.mode == "point":
             global_x, global_y = self._to_global(local_x, local_y)
             self.result_point = CapturedPoint(x=global_x, y=global_y)
@@ -237,8 +271,7 @@ class _CaptureOverlay:
         if self.mode != "region" or self._selection_start is None:
             return
         self._selection_end = (int(event.x), int(event.y))
-        self._update_cursor_label(int(event.x), int(event.y))
-        self._update_magnifier(int(event.x), int(event.y))
+        self._update_follow_hud(int(event.x), int(event.y))
         self._update_selection_rect()
 
     def _on_button_release(self, event) -> None:
@@ -277,50 +310,31 @@ class _CaptureOverlay:
         left, top, right, bottom = self._selection_bounds()
         self._canvas.coords(self._selection_rect, left, top, right, bottom)
 
-    def _update_cursor_label(self, local_x: int, local_y: int) -> None:
+    def _update_cursor_label(self, local_x: int, local_y: int) -> tuple[int, int]:
         global_x, global_y = self._to_global(local_x, local_y)
         text = f"X:{global_x}  Y:{global_y}"
         self._canvas.itemconfigure(self._cursor_label, text=text)
 
         text_box = self._canvas.bbox(self._cursor_label)
         if not text_box:
-            return
-        pad_x = 8
-        pad_y = 5
-        label_width = (text_box[2] - text_box[0]) + pad_x * 2
-        label_height = (text_box[3] - text_box[1]) + pad_y * 2
+            return 0, 0
+        label_width = (text_box[2] - text_box[0]) + CURSOR_LABEL_PAD_X * 2
+        label_height = (text_box[3] - text_box[1]) + CURSOR_LABEL_PAD_Y * 2
+        return label_width, label_height
 
-        max_left = max(0, self._virtual_geometry.width - label_width)
-        max_top = max(0, self._virtual_geometry.height - label_height)
-        anchor_x = min(max(local_x + 18, 0), max_left)
-        anchor_y = min(max(local_y + 18, 0), max_top)
-
-        self._canvas.coords(self._cursor_label, anchor_x + pad_x, anchor_y + pad_y)
-        self._canvas.coords(
-            self._cursor_label_bg,
-            anchor_x,
-            anchor_y,
-            anchor_x + label_width,
-            anchor_y + label_height,
-        )
-        self._canvas.tag_raise(self._cursor_label_bg)
-        self._canvas.tag_raise(self._cursor_label)
-
-    def _position_magnifier(self) -> None:
-        left = max(0, self._virtual_geometry.width - MAGNIFIER_PANEL_SIZE - MAGNIFIER_MARGIN)
-        top = MAGNIFIER_MARGIN
-        title_height = 22
+    def _position_magnifier(self, left: float, top: float) -> None:
+        panel_height = MAGNIFIER_PANEL_SIZE + MAGNIFIER_TITLE_HEIGHT
         self._canvas.coords(
             self._magnifier_panel,
             left,
             top,
             left + MAGNIFIER_PANEL_SIZE,
-            top + MAGNIFIER_PANEL_SIZE + title_height,
+            top + panel_height,
         )
         self._canvas.coords(self._magnifier_title, left + 8, top + 4)
-        self._canvas.coords(self._magnifier_image, left, top + title_height)
+        self._canvas.coords(self._magnifier_image, left, top + MAGNIFIER_TITLE_HEIGHT)
         center_x = left + MAGNIFIER_PANEL_SIZE / 2
-        center_y = top + title_height + MAGNIFIER_PANEL_SIZE / 2
+        center_y = top + MAGNIFIER_TITLE_HEIGHT + MAGNIFIER_PANEL_SIZE / 2
         self._canvas.coords(
             self._magnifier_cross_h,
             left,
@@ -331,15 +345,48 @@ class _CaptureOverlay:
         self._canvas.coords(
             self._magnifier_cross_v,
             center_x,
-            top + title_height,
+            top + MAGNIFIER_TITLE_HEIGHT,
             center_x,
-            top + title_height + MAGNIFIER_PANEL_SIZE,
+            top + MAGNIFIER_TITLE_HEIGHT + MAGNIFIER_PANEL_SIZE,
         )
         self._canvas.tag_raise(self._magnifier_panel)
         self._canvas.tag_raise(self._magnifier_image)
         self._canvas.tag_raise(self._magnifier_cross_h)
         self._canvas.tag_raise(self._magnifier_cross_v)
         self._canvas.tag_raise(self._magnifier_title)
+
+    def _position_follow_hud(self, local_x: int, local_y: int, label_width: int, label_height: int) -> None:
+        panel_height = MAGNIFIER_PANEL_SIZE + MAGNIFIER_TITLE_HEIGHT
+        group_width = max(MAGNIFIER_PANEL_SIZE, label_width)
+        group_height = panel_height + HUD_STACK_GAP + label_height
+        left, top = _resolve_follow_anchor(
+            pointer_x=local_x,
+            pointer_y=local_y,
+            overlay_width=group_width,
+            overlay_height=group_height,
+            screen_width=self._virtual_geometry.width,
+            screen_height=self._virtual_geometry.height,
+        )
+        magnifier_left = left + (group_width - MAGNIFIER_PANEL_SIZE) / 2
+        label_left = left + (group_width - label_width) / 2
+        label_top = top + panel_height + HUD_STACK_GAP
+
+        self._position_magnifier(magnifier_left, top)
+        self._canvas.coords(self._cursor_label, label_left + CURSOR_LABEL_PAD_X, label_top + CURSOR_LABEL_PAD_Y)
+        self._canvas.coords(
+            self._cursor_label_bg,
+            label_left,
+            label_top,
+            label_left + label_width,
+            label_top + label_height,
+        )
+        self._canvas.tag_raise(self._cursor_label_bg)
+        self._canvas.tag_raise(self._cursor_label)
+
+    def _update_follow_hud(self, local_x: int, local_y: int) -> None:
+        label_width, label_height = self._update_cursor_label(local_x, local_y)
+        self._update_magnifier(local_x, local_y)
+        self._position_follow_hud(local_x, local_y, label_width, label_height)
 
     def _update_magnifier(self, local_x: int, local_y: int) -> None:
         half = MAGNIFIER_SOURCE_SIZE // 2
@@ -363,7 +410,6 @@ class _CaptureOverlay:
         zoomed = padded.resize((MAGNIFIER_PANEL_SIZE, MAGNIFIER_PANEL_SIZE), resample=0)
         self._magnifier_photo_image = self._image_tk.PhotoImage(zoomed)
         self._canvas.itemconfigure(self._magnifier_image, image=self._magnifier_photo_image)
-        self._position_magnifier()
 
     def _to_global(self, local_x: int, local_y: int) -> tuple[int, int]:
         return local_x + self._virtual_geometry.left, local_y + self._virtual_geometry.top
