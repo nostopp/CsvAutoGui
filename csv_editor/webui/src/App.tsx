@@ -434,9 +434,9 @@ const TABLE_SINGLE_LINE_STYLE: CSSProperties = {
 };
 
 const DENSE_SECTION_STYLE: CSSProperties = {
-  padding: "12px 13px",
-  gap: 10,
-  borderRadius: 14,
+  padding: "10px 11px",
+  gap: 8,
+  borderRadius: 12,
 };
 
 export default function App() {
@@ -1640,6 +1640,9 @@ export default function App() {
   const currentFlowSummary = currentFlow
     ? `${currentFlow.filename} · 可见 ${visibleNodes.length}/${currentFlow.nodes.length} 行`
     : "选择一个流程后开始编辑。";
+  const currentFlowStatus = currentFlow
+    ? `${currentFlow.filename} · 可见 ${visibleNodes.length}/${currentFlow.nodes.length} · 已选 ${selectedCount} · ${issues.length} 个问题`
+    : "选择一个流程后开始编辑。";
   const showWaitFields = hasVisibleField(activeNodeMeta, "wait_value") || hasVisibleField(activeNodeMeta, "wait_random");
   const showRetryFields = hasVisibleField(activeNodeMeta, "retry_value") || hasVisibleField(activeNodeMeta, "retry_random");
   const showBranchFields = [
@@ -1654,6 +1657,9 @@ export default function App() {
     hasVisibleField(activeNodeMeta, "move_time");
   const inspectorImageTitle = activeNode?.search_target || "当前节点图片";
   const supportsWindowControls = Boolean(bootstrap?.capabilities?.window_controls);
+  const activeNodeHeader = activeNode
+    ? `${activeRowView?.operation_label ?? activeNode.operation} · ${activeNode.operation} · 节点 ${activeNode.index}`
+    : "节点编辑";
 
   return (
     <div className="app-shell">
@@ -1840,25 +1846,15 @@ export default function App() {
             </aside>
 
             <main className="panel center-column center-column-compact">
-              <div className="workbench-top" style={{ gap: 8 }}>
-                <div className="panel-header compact" style={{ alignItems: "center" }}>
-                  <div>
-                    <h2>节点表</h2>
-                    <p>{currentFlowSummary}</p>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <span className="status-pill tone-idle" style={{ minHeight: 26, padding: "3px 9px", fontSize: 11 }}>
-                      已选 {selectedCount}
-                    </span>
-                    <span className="status-pill tone-idle" style={{ minHeight: 26, padding: "3px 9px", fontSize: 11 }}>
-                      可见 {visibleNodes.length}
-                    </span>
-                  </div>
+              <div className="workbench-top workbench-top-compact">
+                <div className="workspace-status-bar">
+                  <span className="workspace-status-primary">{currentFlowStatus}</span>
+                  <span className="workspace-status-secondary">节点表</span>
                 </div>
 
-                <div className="toolbar-strip">
-                  <div className="toolbar-actions toolbar-actions-compact">
-                    <div style={COMMAND_GROUP_STYLE}>
+                <div className="toolbar-strip toolbar-strip-compact">
+                  <div className="toolbar-actions toolbar-actions-compact toolbar-actions-dense">
+                    <div className="command-cluster">
                       <span style={COMMAND_LABEL_STYLE}>历史</span>
                       <button style={COMPACT_BUTTON_STYLE} onClick={handleUndo} disabled={!canUndoEditorHistory(history)}>
                         撤销
@@ -1868,7 +1864,7 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div style={COMMAND_GROUP_STYLE}>
+                    <div className="command-cluster">
                       <span style={COMMAND_LABEL_STYLE}>节点</span>
                       <select value={createOperation} onChange={(event) => setCreateOperation(event.target.value)} className="compact-select">
                         {operationEntries.map(([operation, meta]) => (
@@ -1891,7 +1887,7 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div style={COMMAND_GROUP_STYLE}>
+                    <div className="command-cluster">
                       <span style={COMMAND_LABEL_STYLE}>剪贴板</span>
                       <button style={COMPACT_BUTTON_STYLE} onClick={() => void copySelection()} disabled={!selectedNodeIds.length}>
                         复制
@@ -1904,7 +1900,7 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div style={COMMAND_GROUP_STYLE}>
+                    <div className="command-cluster">
                       <span style={COMMAND_LABEL_STYLE}>工具</span>
                       <button style={COMPACT_BUTTON_STYLE} onClick={() => setActiveToolWindow("csv_preview")} disabled={!currentFlow}>
                         CSV 预览
@@ -1913,14 +1909,14 @@ export default function App() {
                         录制模式
                       </button>
                     </div>
-                    <div className="search-row search-row-compact">
+                    <div className="search-row search-row-compact search-row-dense">
                       <input
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
                         placeholder="搜索目标、摘要、跳转标记、备注"
-                        style={{ padding: "8px 10px" }}
+                        style={{ padding: "7px 10px" }}
                       />
-                      <span className="search-count">{`${selectedCount} 已选 · ${issues.length} 个问题`}</span>
+                      <span className="search-count">{`${selectedCount} 已选`}</span>
                     </div>
                   </div>
                 </div>
@@ -1992,21 +1988,12 @@ export default function App() {
             </main>
 
             <aside className={`panel right-column ${rightCollapsed ? "collapsed-panel" : ""}`}>
-              <div className="panel-header compact" style={{ alignItems: "center" }}>
-                <div>
-                  <h2>节点编辑</h2>
-                  <p>按操作类型展示真正可编辑的 CSV 字段。</p>
+              <div className="inspector-header-bar">
+                <div className="inspector-header-copy">
+                  <strong>{activeNodeHeader}</strong>
+                  <span>{activeNode ? "节点编辑" : "未选择节点"}</span>
                 </div>
                 <div className="panel-header-actions">
-                  {activeNode ? (
-                    <span className="op-pill" data-operation={activeNode.operation} style={{ minHeight: 24, fontSize: 11 }}>
-                      {activeRowView?.operation_label ?? activeNode.operation}
-                    </span>
-                  ) : (
-                    <span className="panel-count" style={{ minWidth: 34, minHeight: 34, borderRadius: 12 }}>
-                      0
-                    </span>
-                  )}
                   <button className="icon-button" onClick={() => setRightCollapsed((current) => !current)}>
                     {rightCollapsed ? "展开" : "收起"}
                   </button>
@@ -2117,6 +2104,13 @@ export default function App() {
                           <input value={activeNode.jump_mark} onChange={(event) => updateNodeField("jump_mark", event.target.value)} />
                         </label>
                       )}
+
+                      {hasVisibleField(activeNodeMeta, "note") && (
+                        <label className="wide-field">
+                          <span>备注</span>
+                          <input value={activeNode.note} onChange={(event) => updateNodeField("note", event.target.value)} placeholder="仅供编辑时查看" />
+                        </label>
+                      )}
                     </div>
                   </section>
 
@@ -2223,13 +2217,6 @@ export default function App() {
                           <span>禁用灰度匹配</span>
                         </label>
                       )}
-
-                      {hasVisibleField(activeNodeMeta, "note") && (
-                        <label className="wide-field">
-                          <span>备注</span>
-                          <input value={activeNode.note} onChange={(event) => updateNodeField("note", event.target.value)} placeholder="仅供编辑时查看" />
-                        </label>
-                      )}
                     </div>
 
                     {(inspectorImage || activeNode.operation === "pic") && (
@@ -2237,7 +2224,6 @@ export default function App() {
                         <div className="subpanel-head compact">
                           <div>
                             <h3>图片预览</h3>
-                            <p>当前 `pic` 节点绑定的图片素材。</p>
                           </div>
                         </div>
                         {inspectorImage ? (
@@ -2265,13 +2251,7 @@ export default function App() {
                 </div>
               ) : !rightCollapsed ? (
                 <div
-                  style={{
-                    border: "1px dashed #d6dfdc",
-                    borderRadius: 14,
-                    padding: "14px 15px",
-                    background: "#fbfcf9",
-                    color: "#627277",
-                  }}
+                  className="inspector-empty"
                 >
                   选择一个节点后在这里编辑对应的 CSV 字段。
                 </div>
