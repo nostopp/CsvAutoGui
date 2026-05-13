@@ -92,6 +92,17 @@ type ImageLightboxState = {
   title: string;
 };
 
+type SelectionGesture = {
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+};
+
+type SelectionClickResult<T extends string> = {
+  selectedIds: T[];
+  anchorId: T | null;
+};
+
 const EMPTY_BRANCH = {
   trigger: "none",
   mode: "none",
@@ -289,6 +300,60 @@ function compactSummary(node: OperationNodeDTO): string {
   return getNodeRowView(node).secondary_text;
 }
 
+function resolveSelectionClick<T extends string>(
+  orderedIds: readonly T[],
+  currentSelectedIds: readonly T[],
+  clickedId: T,
+  anchorId: T | null,
+  gesture: SelectionGesture,
+  options?: { allowEmpty?: boolean },
+): SelectionClickResult<T> {
+  const allowEmpty = options?.allowEmpty ?? true;
+  const modifier = gesture.ctrlKey || gesture.metaKey;
+  const selectedSet = new Set(currentSelectedIds.filter((id) => orderedIds.includes(id)));
+  const anchorIndex = anchorId ? orderedIds.indexOf(anchorId) : -1;
+  const clickedIndex = orderedIds.indexOf(clickedId);
+
+  if (gesture.shiftKey && anchorIndex >= 0 && clickedIndex >= 0) {
+    const start = Math.min(anchorIndex, clickedIndex);
+    const end = Math.max(anchorIndex, clickedIndex);
+    const rangeIds = orderedIds.slice(start, end + 1);
+    if (modifier) {
+      for (const id of rangeIds) {
+        selectedSet.add(id);
+      }
+      return {
+        selectedIds: orderedIds.filter((id) => selectedSet.has(id)),
+        anchorId,
+      };
+    }
+    return {
+      selectedIds: [...rangeIds],
+      anchorId,
+    };
+  }
+
+  if (modifier) {
+    if (selectedSet.has(clickedId)) {
+      selectedSet.delete(clickedId);
+    } else {
+      selectedSet.add(clickedId);
+    }
+    if (!allowEmpty && !selectedSet.size) {
+      selectedSet.add(clickedId);
+    }
+    return {
+      selectedIds: orderedIds.filter((id) => selectedSet.has(id)),
+      anchorId: clickedId,
+    };
+  }
+
+  return {
+    selectedIds: [clickedId],
+    anchorId: clickedId,
+  };
+}
+
 function parseConfidence(value: string): number {
   const numeric = Number.parseFloat(value);
   if (!Number.isFinite(numeric)) {
@@ -378,6 +443,7 @@ export default function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapDTO | null>(null);
   const [history, setHistory] = useState(() => createEditorHistoryState(null));
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [nodeSelectionAnchorId, setNodeSelectionAnchorId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [flowQuery, setFlowQuery] = useState("");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -387,6 +453,7 @@ export default function App() {
   const [issues, setIssues] = useState<ValidationIssueDTO[]>([]);
   const [unusedImages, setUnusedImages] = useState<UnusedImageDTO[]>([]);
   const [selectedUnusedImageNames, setSelectedUnusedImageNames] = useState<string[]>([]);
+  const [unusedImageSelectionAnchor, setUnusedImageSelectionAnchor] = useState<string | null>(null);
   const [previewImagePath, setPreviewImagePath] = useState<string | null>(null);
   const [imageLightbox, setImageLightbox] = useState<ImageLightboxState | null>(null);
   const [windowMaximized, setWindowMaximized] = useState(false);
@@ -399,6 +466,7 @@ export default function App() {
     selectedFlow: null,
     selectedNodeIds: [],
   });
+  const [importSelectionAnchorId, setImportSelectionAnchorId] = useState<string | null>(null);
   const [recordingDialog, setRecordingDialog] = useState<RecordingDialogState>({
     open: false,
     windows: [],
@@ -411,6 +479,7 @@ export default function App() {
     reviewRows: [],
     summary: null,
   });
+  const [recordedSelectionAnchorId, setRecordedSelectionAnchorId] = useState<string | null>(null);
   const [ocrCandidateDialog, setOcrCandidateDialog] = useState<OcrCandidateDialogState>(EMPTY_OCR_CANDIDATE_DIALOG);
   const document = history.present;
 
@@ -436,6 +505,7 @@ export default function App() {
               reviewRows: stoppedResult.data.review_rows,
               summary: stoppedResult.data.summary,
             }));
+            setRecordedSelectionAnchorId(stoppedResult.data.nodes[0]?.node_id ?? null);
           } else {
             setRecordingDialog((current) => ({ ...current, session: result.data }));
           }
@@ -564,6 +634,16 @@ export default function App() {
       return haystack.includes(query);
     });
   }, [currentFlow, searchQuery]);
+  const importFlow = useMemo(
+    () => flowByName(importDialog.document, importDialog.selectedFlow),
+    [importDialog.document, importDialog.selectedFlow],
+  );
+  const importFlowNodes = useMemo(() => importFlow?.nodes ?? [], [importFlow]);
+  const unusedImageNames = useMemo(() => unusedImages.map((image) => image.image_name), [unusedImages]);
+  const recordedNodeIds = useMemo(
+    () => recordingDialog.recordedNodes.map((node) => node.node_id),
+    [recordingDialog.recordedNodes],
+  );
 
   const visibleFlows = useMemo(() => {
     const flows = document?.flows ?? [];
@@ -699,6 +779,7 @@ export default function App() {
     const result = applyEditorTransaction(history, transaction, selectionBefore ?? createEditorSelection(selectedNodeIds));
     setHistory(result.history);
     setSelectedNodeIds(result.selection.selectedNodeIds);
+    setNodeSelectionAnchorId(result.history.present?.state.selected_node_id ?? result.selection.selectedNodeIds[0] ?? null);
   }
 
   function commitDocument(
@@ -753,8 +834,10 @@ export default function App() {
     setIssues([]);
     setUnusedImages([]);
     setSelectedUnusedImageNames([]);
+    setUnusedImageSelectionAnchor(null);
     setPreviewImagePath(null);
     setSelectedNodeIds(result.data.state.selected_node_id ? [result.data.state.selected_node_id] : []);
+    setNodeSelectionAnchorId(result.data.state.selected_node_id ?? null);
     replaceDocument(result.data);
     setNotice({ tone: "success", text: `已加载配置：${rootPath}` });
   }
@@ -836,20 +919,26 @@ export default function App() {
     }
     setUnusedImages(result.data);
     setSelectedUnusedImageNames([]);
+    setUnusedImageSelectionAnchor(null);
     setPreviewImagePath(result.data[0]?.image_path ?? null);
     setNotice({ tone: "success", text: `发现 ${result.data.length} 张未使用图片。` });
   }
 
-  function toggleUnusedImageSelection(imageName: string, checked: boolean) {
-    setSelectedUnusedImageNames((current) => {
-      const next = new Set(current);
-      if (checked) {
-        next.add(imageName);
-      } else {
-        next.delete(imageName);
-      }
-      return [...next];
-    });
+  function handleUnusedImageSelection(imageName: string, gesture: SelectionGesture) {
+    const result = resolveSelectionClick(
+      unusedImageNames,
+      selectedUnusedImageNames,
+      imageName,
+      unusedImageSelectionAnchor,
+      gesture,
+      { allowEmpty: true },
+    );
+    setSelectedUnusedImageNames(result.selectedIds);
+    setUnusedImageSelectionAnchor(result.anchorId);
+    const image = unusedImages.find((item) => item.image_name === imageName);
+    if (image) {
+      setPreviewImagePath(image.image_path);
+    }
   }
 
   async function openUnusedAssetsWorkspace() {
@@ -880,6 +969,7 @@ export default function App() {
     const nextUnusedImages = unusedImages.filter((image) => !deleted.has(image.image_name));
     setUnusedImages(nextUnusedImages);
     setSelectedUnusedImageNames((current) => current.filter((name) => !deleted.has(name)));
+    setUnusedImageSelectionAnchor(null);
     setPreviewImagePath((current) => {
       const stillExists = nextUnusedImages.some((image) => image.image_path === current);
       if (stillExists) {
@@ -902,6 +992,7 @@ export default function App() {
     const result = undoEditorHistory(history);
     setHistory(result.history);
     setSelectedNodeIds(result.selection?.selectedNodeIds ?? []);
+    setNodeSelectionAnchorId(result.history.present?.state.selected_node_id ?? result.selection?.selectedNodeIds?.[0] ?? null);
   }
 
   function handleRedo() {
@@ -911,6 +1002,7 @@ export default function App() {
     const result = redoEditorHistory(history);
     setHistory(result.history);
     setSelectedNodeIds(result.selection?.selectedNodeIds ?? []);
+    setNodeSelectionAnchorId(result.history.present?.state.selected_node_id ?? result.selection?.selectedNodeIds?.[0] ?? null);
   }
 
   function selectFlow(filename: string) {
@@ -927,18 +1019,27 @@ export default function App() {
       draft.state.selected_node_id = nextNodeId;
     });
     setSelectedNodeIds(nextNodeId ? [nextNodeId] : []);
+    setNodeSelectionAnchorId(nextNodeId);
   }
 
-  function toggleNodeSelection(nodeId: string, checked: boolean) {
-    setSelectedNodeIds((current) => {
-      const next = new Set(current);
-      if (checked) {
-        next.add(nodeId);
-      } else {
-        next.delete(nodeId);
-      }
-      return [...next];
+  function handleNodeSelection(nodeId: string, gesture: SelectionGesture) {
+    if (!document) {
+      return;
+    }
+    const result = resolveSelectionClick(
+      visibleNodes.map((node) => node.node_id),
+      selectedNodeIds,
+      nodeId,
+      nodeSelectionAnchorId,
+      gesture,
+      { allowEmpty: false },
+    );
+    const nextActiveNodeId = result.selectedIds.includes(nodeId) ? nodeId : result.selectedIds[result.selectedIds.length - 1] ?? nodeId;
+    updateDocumentView((draft) => {
+      draft.state.selected_node_id = nextActiveNodeId;
     });
+    setSelectedNodeIds(result.selectedIds);
+    setNodeSelectionAnchorId(result.anchorId ?? nextActiveNodeId);
   }
 
   function activateNode(nodeId: string) {
@@ -948,7 +1049,8 @@ export default function App() {
     updateDocumentView((draft) => {
       draft.state.selected_node_id = nodeId;
     });
-    setSelectedNodeIds((current) => (current.includes(nodeId) ? current : [nodeId]));
+    setSelectedNodeIds([nodeId]);
+    setNodeSelectionAnchorId(nodeId);
   }
 
   function addNode(operation: string) {
@@ -973,6 +1075,7 @@ export default function App() {
       { selectionAfter: [newNode.node_id] },
     );
     setSelectedNodeIds([newNode.node_id]);
+    setNodeSelectionAnchorId(newNode.node_id);
     setNotice({ tone: "success", text: `已新增 ${getOperationMeta(bootstrap, operation).label} 节点。` });
   }
 
@@ -997,6 +1100,7 @@ export default function App() {
       { selectionAfter: [] },
     );
     setSelectedNodeIds([]);
+    setNodeSelectionAnchorId(null);
   }
 
   function moveSelection(direction: -1 | 1) {
@@ -1083,6 +1187,7 @@ export default function App() {
       { selectionAfter: cloned.map((node) => node.node_id) },
     );
     setSelectedNodeIds(cloned.map((node) => node.node_id));
+    setNodeSelectionAnchorId(cloned[0]?.node_id ?? null);
     setNotice({ tone: "success", text: `已粘贴 ${cloned.length} 个节点。` });
   }
 
@@ -1232,6 +1337,7 @@ export default function App() {
       selectedFlow: null,
       selectedNodeIds: [],
     });
+    setImportSelectionAnchorId(null);
   }
 
   async function chooseImportDirectory() {
@@ -1254,6 +1360,23 @@ export default function App() {
       selectedFlow: result.data.flows[0]?.filename ?? null,
       selectedNodeIds: [],
     });
+    setImportSelectionAnchorId(null);
+  }
+
+  function handleImportNodeSelection(nodeId: string, gesture: SelectionGesture) {
+    const result = resolveSelectionClick(
+      importFlowNodes.map((node) => node.node_id),
+      importDialog.selectedNodeIds,
+      nodeId,
+      importSelectionAnchorId,
+      gesture,
+      { allowEmpty: true },
+    );
+    setImportDialog((current) => ({
+      ...current,
+      selectedNodeIds: result.selectedIds,
+    }));
+    setImportSelectionAnchorId(result.anchorId);
   }
 
   async function importSelectedNodes() {
@@ -1294,7 +1417,9 @@ export default function App() {
       { selectionAfter: cloned.map((node) => node.node_id) },
     );
     setSelectedNodeIds(cloned.map((node) => node.node_id));
+    setNodeSelectionAnchorId(cloned[0]?.node_id ?? null);
     setImportDialog((current) => ({ ...current, open: false }));
+    setImportSelectionAnchorId(null);
     setNotice({ tone: "success", text: `已导入 ${cloned.length} 个节点。` });
   }
 
@@ -1310,6 +1435,7 @@ export default function App() {
       reviewRows: [],
       summary: null,
     }));
+    setRecordedSelectionAnchorId(null);
     if (!windows.ok) {
       setNotice({ tone: "warning", text: windows.error.message });
     }
@@ -1341,6 +1467,7 @@ export default function App() {
       reviewRows: [],
       summary: null,
     }));
+    setRecordedSelectionAnchorId(null);
     setNotice({ tone: "success", text: "录制已开始。" });
   }
 
@@ -1376,6 +1503,7 @@ export default function App() {
       reviewRows: result.data.review_rows,
       summary: result.data.summary,
     }));
+    setRecordedSelectionAnchorId(result.data.nodes[0]?.node_id ?? null);
     setNotice({ tone: "success", text: `录制得到 ${result.data.nodes.length} 个节点。` });
   }
 
@@ -1409,6 +1537,7 @@ export default function App() {
       { selectionAfter: [targetNodeId] },
     );
     setSelectedNodeIds([targetNodeId]);
+    setNodeSelectionAnchorId(targetNodeId);
     setOcrCandidateDialog(EMPTY_OCR_CANDIDATE_DIALOG);
     setNotice({ tone: "success", text: "已回填 OCR 文本与区域。" });
   }
@@ -1461,6 +1590,7 @@ export default function App() {
       { selectionAfter: cloned.map((node) => node.node_id) },
     );
     setSelectedNodeIds(cloned.map((node) => node.node_id));
+    setNodeSelectionAnchorId(cloned[0]?.node_id ?? null);
     setRecordingDialog((current) => ({
       ...current,
       open: false,
@@ -1468,19 +1598,24 @@ export default function App() {
       selectedRecordedNodeIds: [],
       session: null,
     }));
+    setRecordedSelectionAnchorId(null);
     setNotice({ tone: "success", text: `已插入 ${cloned.length} 个录制节点。` });
   }
 
-  function toggleRecordedNodeSelection(nodeId: string, checked: boolean) {
-    setRecordingDialog((current) => {
-      const next = new Set(current.selectedRecordedNodeIds);
-      if (checked) {
-        next.add(nodeId);
-      } else {
-        next.delete(nodeId);
-      }
-      return { ...current, selectedRecordedNodeIds: [...next] };
-    });
+  function handleRecordedNodeSelection(nodeId: string, gesture: SelectionGesture) {
+    const result = resolveSelectionClick(
+      recordedNodeIds,
+      recordingDialog.selectedRecordedNodeIds,
+      nodeId,
+      recordedSelectionAnchorId,
+      gesture,
+      { allowEmpty: true },
+    );
+    setRecordingDialog((current) => ({
+      ...current,
+      selectedRecordedNodeIds: result.selectedIds,
+    }));
+    setRecordedSelectionAnchorId(result.anchorId);
   }
 
   function issueTone(severity: string): string {
@@ -1795,7 +1930,6 @@ export default function App() {
                 <table className="node-table" style={{ tableLayout: "fixed" }}>
                   <thead>
                     <tr>
-                      <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 40 }}></th>
                       <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 52 }}>序号</th>
                       <th style={{ ...TABLE_HEADER_CELL_STYLE, width: 96 }}>类型</th>
                       <th style={{ ...TABLE_HEADER_CELL_STYLE, width: "13%" }}>跳转标记</th>
@@ -1812,18 +1946,13 @@ export default function App() {
                       return (
                         <tr
                           key={node.node_id}
-                          className={node.node_id === document?.state.selected_node_id ? "active-row" : ""}
-                          onClick={() => activateNode(node.node_id)}
+                          className={[
+                            selectedNodeIds.includes(node.node_id) ? "selected-row" : "",
+                            node.node_id === document?.state.selected_node_id ? "active-row" : "",
+                          ].filter(Boolean).join(" ")}
+                          onClick={(event) => handleNodeSelection(node.node_id, event)}
                           title={rowView.summary}
                         >
-                          <td className="checkbox-cell" style={{ ...TABLE_BODY_CELL_STYLE, width: 40 }}>
-                            <input
-                              type="checkbox"
-                              checked={selectedNodeIds.includes(node.node_id)}
-                              onChange={(event) => toggleNodeSelection(node.node_id, event.target.checked)}
-                              onClick={(event) => event.stopPropagation()}
-                            />
-                          </td>
                           <td style={TABLE_BODY_CELL_STYLE}>
                             <span className="index-pill" style={{ minWidth: 28, height: 24, fontSize: 11 }}>
                               {node.index}
@@ -1852,7 +1981,7 @@ export default function App() {
                     })}
                     {!visibleNodes.length && (
                       <tr>
-                        <td colSpan={7} className="empty">
+                        <td colSpan={6} className="empty">
                           {document ? "没有匹配当前筛选条件的节点。" : "先打开配置目录后开始编辑。"}
                         </td>
                       </tr>
@@ -2171,13 +2300,14 @@ export default function App() {
                   <button
                     key={flow.filename}
                     className={importDialog.selectedFlow === flow.filename ? "flow-item active" : "flow-item"}
-                    onClick={() =>
+                    onClick={() => {
                       setImportDialog((current) => ({
                         ...current,
                         selectedFlow: flow.filename,
                         selectedNodeIds: [],
-                      }))
-                    }
+                      }));
+                      setImportSelectionAnchorId(null);
+                    }}
                   >
                     <span>{flow.filename}</span>
                     <strong>{flow.nodes.length}</strong>
@@ -2188,29 +2318,18 @@ export default function App() {
                 <table className="node-table">
                   <thead>
                     <tr>
-                      <th></th>
                       <th>序号</th>
                       <th>类型</th>
                       <th>摘要</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {flowByName(importDialog.document, importDialog.selectedFlow)?.nodes.map((node) => (
-                      <tr key={node.node_id}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={importDialog.selectedNodeIds.includes(node.node_id)}
-                            onChange={(event) =>
-                              setImportDialog((current) => ({
-                                ...current,
-                                selectedNodeIds: event.target.checked
-                                  ? [...current.selectedNodeIds, node.node_id]
-                                  : current.selectedNodeIds.filter((item) => item !== node.node_id),
-                              }))
-                            }
-                          />
-                        </td>
+                    {importFlowNodes.map((node) => (
+                      <tr
+                        key={node.node_id}
+                        className={importDialog.selectedNodeIds.includes(node.node_id) ? "selected-row" : ""}
+                        onClick={(event) => handleImportNodeSelection(node.node_id, event)}
+                      >
                         <td>{node.index}</td>
                         <td>{getNodeRowView(node).operation_label}</td>
                         <td>{getNodeRowView(node).summary}</td>
@@ -2265,16 +2384,16 @@ export default function App() {
             <div className="asset-workspace">
               <div className="asset-list">
                 {unusedImages.map((image) => (
-                  <label
+                  <div
                     key={image.image_path}
-                    className={previewImagePath === image.image_path ? "asset-row active" : "asset-row"}
+                    className={[
+                      "asset-row",
+                      selectedUnusedImageNames.includes(image.image_name) ? "selected" : "",
+                      previewImagePath === image.image_path ? "previewing" : "",
+                    ].filter(Boolean).join(" ")}
+                    onClick={(event) => handleUnusedImageSelection(image.image_name, event)}
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedUnusedImageNames.includes(image.image_name)}
-                      onChange={(event) => toggleUnusedImageSelection(image.image_name, event.target.checked)}
-                    />
-                    <button type="button" className="asset-open-button" onClick={() => setPreviewImagePath(image.image_path)}>
+                    <div className="asset-open-button">
                       <div className="asset-thumbnail">
                         <img src={fileUrl(image.image_path) ?? ""} alt={image.image_name} />
                       </div>
@@ -2282,8 +2401,8 @@ export default function App() {
                         <strong>{image.image_name}</strong>
                         <span>{image.image_path}</span>
                       </div>
-                    </button>
-                  </label>
+                    </div>
+                  </div>
                 ))}
                 {!unusedImages.length && <p className="empty">请先扫描未使用图片。</p>}
               </div>
@@ -2411,44 +2530,40 @@ export default function App() {
               </div>
             )}
             <div className="node-table-wrap">
-              <table className="node-table">
-                <thead>
-                  <tr>
-                    <th></th>
-                    <th>序号</th>
-                    <th>来源</th>
-                    <th>语义</th>
-                    <th>操作</th>
-                    <th>目标</th>
-                    <th>区域</th>
-                    <th>策略</th>
+                <table className="node-table">
+                  <thead>
+                    <tr>
+                      <th>序号</th>
+                      <th>来源</th>
+                      <th>语义</th>
+                      <th>操作</th>
+                      <th>目标</th>
+                      <th>区域</th>
+                      <th>策略</th>
                   </tr>
                 </thead>
                 <tbody>
                   {recordingDialog.recordedNodes.map((node, index) => {
                     const review = recordingDialog.reviewRows[index];
                     return (
-                    <tr key={node.node_id} className={recordingDialog.selectedRecordedNodeIds.includes(node.node_id) ? "active-row" : ""}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={recordingDialog.selectedRecordedNodeIds.includes(node.node_id)}
-                          onChange={(event) => toggleRecordedNodeSelection(node.node_id, event.target.checked)}
-                        />
-                      </td>
-                      <td>{node.index}</td>
-                      <td>{review?.source ?? "事件"}</td>
-                      <td>{review?.semantic ?? summarizeNode(node)}</td>
-                      <td>{node.operation}</td>
-                      <td>{review?.target_text || node.search_target || node.param_text}</td>
-                      <td>{review?.region_text || node.region_text || "-"}</td>
-                      <td>{review?.strategy_text || node.note || "-"}</td>
-                    </tr>
+                      <tr
+                        key={node.node_id}
+                        className={recordingDialog.selectedRecordedNodeIds.includes(node.node_id) ? "selected-row" : ""}
+                        onClick={(event) => handleRecordedNodeSelection(node.node_id, event)}
+                      >
+                        <td>{node.index}</td>
+                        <td>{review?.source ?? "事件"}</td>
+                        <td>{review?.semantic ?? summarizeNode(node)}</td>
+                        <td>{node.operation}</td>
+                        <td>{review?.target_text || node.search_target || node.param_text}</td>
+                        <td>{review?.region_text || node.region_text || "-"}</td>
+                        <td>{review?.strategy_text || node.note || "-"}</td>
+                      </tr>
                     );
                   })}
                   {!recordingDialog.recordedNodes.length && (
                     <tr>
-                      <td colSpan={8} className="empty">
+                      <td colSpan={7} className="empty">
                         开始录制并停止后，这里会显示生成的节点。
                       </td>
                     </tr>
@@ -2472,7 +2587,7 @@ export default function App() {
             </div>
             <div className="flow-list">
               {ocrCandidateDialog.candidates.map((candidate) => (
-                <label key={candidate} className={ocrCandidateDialog.selected === candidate ? "asset-row active" : "asset-row"}>
+                <label key={candidate} className={ocrCandidateDialog.selected === candidate ? "flow-item active" : "flow-item"}>
                   <input
                     type="radio"
                     name="ocr-candidate"

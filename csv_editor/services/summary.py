@@ -294,6 +294,17 @@ def _secondary_text(node: OperationNode, branch_text: str) -> str:
 
 
 def _locator_text(node: OperationNode) -> str:
+    if node.operation == OperationType.JUMP.value:
+        return _default_text(node.param_text, "(未设置)")
+
+    if node.operation in {OperationType.PIC.value, OperationType.OCR.value} and node.branch.is_enabled:
+        if node.branch.mode is BranchMode.JUMP_PAIR:
+            exist_target, not_exist_target = _branch_jump_pair_targets(node)
+            return f"exist-> {exist_target} · notExist-> {not_exist_target}"
+        if node.branch.mode is BranchMode.SUBFLOW:
+            subflow_target = _default_text(node.branch.primary_target, "(未设置)")
+            return f"启动 {subflow_target}"
+
     if node.search_target.strip():
         return node.search_target.strip()
     if node.param_text.strip():
@@ -322,6 +333,14 @@ def _branch_text(node: OperationNode) -> str:
     if node.branch.mode is BranchMode.JUMP_PAIR:
         return f"{trigger_text}跳转 {primary_target}，否则跳转 {secondary_target}"
     return f"{trigger_text} -> {primary_target}"
+
+
+def _branch_jump_pair_targets(node: OperationNode) -> tuple[str, str]:
+    primary_target = _default_text(node.branch.primary_target, "(未设置)")
+    secondary_target = _default_text(node.branch.secondary_target, "(未设置)")
+    if node.branch.trigger is BranchTrigger.NOT_EXIST:
+        return secondary_target, primary_target
+    return primary_target, secondary_target
 
 
 def _trigger_text(trigger: BranchTrigger) -> str:

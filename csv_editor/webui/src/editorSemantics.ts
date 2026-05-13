@@ -407,7 +407,7 @@ export function getNodeRowView(node: OperationNodeDTO): NodeRowViewDTO {
   const branchText = buildBranchText(node);
   const summary = buildSummary(node, operationMeta.label);
   const secondaryText = node.note || node.jump_mark || branchText || "-";
-  const locatorText = node.search_target || node.param_text || "(未设置)";
+  const locatorText = buildLocatorText(node);
   const regionText = node.region_text || "-";
   const timingText = buildTimingText(node);
   return {
@@ -450,6 +450,39 @@ function buildBranchText(node: OperationNodeDTO): string {
     return `${node.branch.trigger} -> ${node.branch.primary_target || "(未设置)"} / ${node.branch.secondary_target || "(未设置)"}`;
   }
   return `${node.branch.trigger} -> ${node.branch.primary_target || "(未设置)"}`;
+}
+
+function buildLocatorText(node: OperationNodeDTO): string {
+  if (node.operation === "jmp") {
+    return node.param_text || "(未设置)";
+  }
+
+  if ((node.operation === "pic" || node.operation === "ocr") && node.branch.trigger !== "none" && node.branch.mode !== "none") {
+    if (node.branch.mode === "jump_pair") {
+      const [existTarget, notExistTarget] = branchJumpPairTargets(node);
+      return `exist-> ${existTarget} · notExist-> ${notExistTarget}`;
+    }
+    if (node.branch.mode === "subflow") {
+      return `启动 ${node.branch.primary_target || "(未设置)"}`;
+    }
+  }
+
+  if (node.search_target) {
+    return node.search_target;
+  }
+  if (node.param_text) {
+    return node.param_text;
+  }
+  return "(未设置)";
+}
+
+function branchJumpPairTargets(node: OperationNodeDTO): [string, string] {
+  const primaryTarget = node.branch.primary_target || "(未设置)";
+  const secondaryTarget = node.branch.secondary_target || "(未设置)";
+  if (node.branch.trigger === "notExist") {
+    return [secondaryTarget, primaryTarget];
+  }
+  return [primaryTarget, secondaryTarget];
 }
 
 function pairText(first: string, second: string): string {
