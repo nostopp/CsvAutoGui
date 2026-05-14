@@ -10,9 +10,9 @@ from typing import Any
 from uuid import uuid4
 
 from csv_editor.adapters.ocr_adapter import RuntimeOcrPreviewAdapter
+from csv_editor.domain.models import EditorState
 from csv_editor.domain.models import EditorDocument, FlowDocument, OperationNode
 from csv_editor.io.csv_codec import CsvEditorCodec
-from csv_editor.io.editor_state import EditorStateRepository
 from csv_editor.io.assets import save_capture_image
 from csv_editor.io.node_clipboard import (
     CLIPBOARD_TEXT_PREFIX,
@@ -82,7 +82,6 @@ class EditorBridgeApi:
         app_version: str = "0.0.0",
         frontend_entry: str | None = None,
         codec: CsvEditorCodec | None = None,
-        state_repo: EditorStateRepository | None = None,
         clipboard: SystemClipboard | None = None,
     ) -> None:
         self._initial_root_path = initial_root_path
@@ -90,7 +89,6 @@ class EditorBridgeApi:
         self._app_version = app_version
         self._frontend_entry = frontend_entry
         self._codec = codec or CsvEditorCodec()
-        self._state_repo = state_repo or EditorStateRepository(enabled=True)
         self._clipboard = clipboard or SystemClipboard()
         self._editor_clipboard_payload: NodeClipboardPayload | None = None
         self._window: Any | None = None
@@ -161,8 +159,8 @@ class EditorBridgeApi:
         try:
             root_path = self._resolve_root_path(rootPath)
             document = self._codec.load_document(root_path)
-            document.state = self._state_repo.load(root_path)
             document.ensure_main_first()
+            document.state = self._default_document_state(document)
             return ApiResult.success(editor_document_to_dict(document)).to_dict()
         except FileNotFoundError:
             return ApiResult.failure("config_not_found", f"Config directory not found: {rootPath}").to_dict()
@@ -179,10 +177,9 @@ class EditorBridgeApi:
             self._validate_flow_paths(document)
             self._delete_removed_flows(document)
             self._codec.save_document(document)
-            self._state_repo.save(root_path, document.state)
             normalized = self._codec.load_document(root_path)
-            normalized.state = document.state
             normalized.ensure_main_first()
+            normalized.state = self._default_document_state(normalized, document.state)
             return ApiResult.success(save_document_result_to_dict(normalized)).to_dict()
         except FileNotFoundError:
             return ApiResult.failure("config_not_found", f"Config directory not found: {self._document_root_for_error(input)}").to_dict()
@@ -211,6 +208,23 @@ class EditorBridgeApi:
             return ApiResult.failure("csv_parse_error", "Failed to parse csv files", {"reason": str(exc)}).to_dict()
         except OSError as exc:
             return ApiResult.failure("io_error", "Failed to list external flows", {"reason": str(exc)}).to_dict()
+
+    @staticmethod
+    def _default_document_state(document: EditorDocument, current_state: EditorState | None = None) -> EditorState:
+        flow_names = [flow.filename for flow in document.flows]
+        if not flow_names:
+            return EditorState(selected_flow="main.csv", selected_node_id=None)
+
+        preferred_flow = (current_state.selected_flow if current_state else "") or "main.csv"
+        selected_flow = preferred_flow if preferred_flow in flow_names else flow_names[0]
+
+        selected_node_id = current_state.selected_node_id if current_state else None
+        if selected_node_id:
+            flow = document.get_flow(selected_flow)
+            if flow is None or flow.get_node(selected_node_id) is None:
+                selected_node_id = None
+
+        return EditorState(selected_flow=selected_flow, selected_node_id=selected_node_id)
 
     def import_nodes(self, input: object) -> dict[str, object]:
         data = input if isinstance(input, dict) else {}
