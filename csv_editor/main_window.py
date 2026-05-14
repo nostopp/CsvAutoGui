@@ -46,7 +46,6 @@ from csv_editor.domain.enums import BranchMode, BranchTrigger, OperationType, Va
 from csv_editor.domain.models import BranchConfig, EditorDocument, FlowDocument, OperationNode, ValidationIssue
 from csv_editor.io.assets import save_capture_image
 from csv_editor.io.csv_codec import CsvEditorCodec
-from csv_editor.io.editor_state import EditorStateRepository
 from csv_editor.io.node_clipboard import (
     CLIPBOARD_MIME_TYPE,
     CLIPBOARD_TEXT_PREFIX,
@@ -153,7 +152,6 @@ class EditorMainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.codec = CsvEditorCodec()
-        self.state_repo = EditorStateRepository(enabled=False)
         self.ocr_preview = RuntimeOcrPreviewAdapter()
         self.undo_stack = QUndoStack(self)
         self.document: EditorDocument | None = None
@@ -336,7 +334,6 @@ class EditorMainWindow(QMainWindow):
             QMessageBox.warning(self, "路径不存在", f"未找到目录: {root_path}")
             return
         document = self.codec.load_document(root_path)
-        document.state = self.state_repo.load(root_path)
         self.document = document
         self.undo_stack.clear()
         self.undo_stack.setClean()
