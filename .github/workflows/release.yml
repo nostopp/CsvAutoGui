@@ -22,12 +22,12 @@ jobs:
       should_release: ${{ steps.version.outputs.should_release }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -90,6 +90,8 @@ jobs:
     needs: detect-version
     if: needs.detect-version.outputs.should_release == 'true'
     runs-on: windows-latest
+    env:
+      RELEASE_OUTPUT_ROOT: C:\release-output
     strategy:
       fail-fast: false
       matrix:
@@ -98,10 +100,10 @@ jobs:
           - gpu
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -125,12 +127,12 @@ jobs:
       - name: Build ${{ matrix.variant }} release
         shell: pwsh
         run: |
-          uv run python scripts/build_release.py --variant ${{ matrix.variant }} --clean
+          uv run python scripts/build_release.py --variant ${{ matrix.variant }} --clean --output-root "$env:RELEASE_OUTPUT_ROOT"
 
       - name: Verify packaged archive
         shell: pwsh
         run: |
-          $archive = "artifacts/release/CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z"
+          $archive = Join-Path $env:RELEASE_OUTPUT_ROOT "CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z"
           if (-not (Test-Path -LiteralPath $archive)) {
             throw "Missing packaged archive: $archive"
           }
@@ -140,7 +142,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.variant }}
-          path: artifacts/release/CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z
+          path: ${{ env.RELEASE_OUTPUT_ROOT }}/CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z
           if-no-files-found: error
 
   release:
@@ -151,7 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

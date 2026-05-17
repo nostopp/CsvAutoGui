@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import tomllib
+import ctypes
 from pathlib import Path
 
 
@@ -113,6 +115,32 @@ def run(cmd: list[str], cwd: Path) -> None:
     subprocess.run(cmd, cwd=cwd, check=True)
 
 
+def supports_windows_file_compression(path: Path) -> bool:
+    if os.name != "nt":
+        return False
+
+    volume_root = path.resolve().anchor
+    if not volume_root:
+        raise RuntimeError(f"Unable to determine volume root for {path}")
+
+    fs_flags = ctypes.c_uint32()
+    result = ctypes.windll.kernel32.GetVolumeInformationW(
+        ctypes.c_wchar_p(volume_root),
+        None,
+        0,
+        None,
+        None,
+        ctypes.byref(fs_flags),
+        None,
+        0,
+    )
+    if result == 0:
+        raise ctypes.WinError()
+
+    FILE_FILE_COMPRESSION = 0x00000010
+    return bool(fs_flags.value & FILE_FILE_COMPRESSION)
+
+
 def resolve_7z(override: Path | None = None) -> str:
     if override is not None:
         candidate = override.expanduser().resolve()
@@ -133,13 +161,17 @@ def compress_runtime(release_dir: Path) -> None:
     internal_dir = release_dir / "_internal"
     if not internal_dir.exists():
         raise RuntimeError(f"Missing packaged runtime directory: {internal_dir}")
+    if not supports_windows_file_compression(internal_dir):
+        raise RuntimeError(
+            f"Volume for {internal_dir} does not support Windows file compression. "
+            "Choose an NTFS output directory before enabling runtime compression."
+        )
     run(
         [
             "compact.exe",
             "/c",
             f"/s:{internal_dir}",
             "/a",
-            "/i",
             "/f",
             "/exe:lzx",
         ],
