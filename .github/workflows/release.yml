@@ -108,7 +108,7 @@ jobs:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v6
 
       - name: Install 7-Zip
         shell: pwsh
@@ -139,7 +139,7 @@ jobs:
           Get-Item -LiteralPath $archive | Select-Object FullName, Length | Format-Table -AutoSize
 
       - name: Upload packaged archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-${{ matrix.variant }}
           path: ${{ env.RELEASE_OUTPUT_ROOT }}/CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z
@@ -158,7 +158,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download packaged archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           pattern: release-*
           merge-multiple: true
