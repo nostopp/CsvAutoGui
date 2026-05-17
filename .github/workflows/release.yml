@@ -90,8 +90,6 @@ jobs:
     needs: detect-version
     if: needs.detect-version.outputs.should_release == 'true'
     runs-on: windows-latest
-    env:
-      RELEASE_OUTPUT_ROOT: C:\release-output
     strategy:
       fail-fast: false
       matrix:
@@ -127,12 +125,12 @@ jobs:
       - name: Build ${{ matrix.variant }} release
         shell: pwsh
         run: |
-          uv run python scripts/build_release.py --variant ${{ matrix.variant }} --clean --output-root "$env:RELEASE_OUTPUT_ROOT"
+          uv run python scripts/build_release.py --variant ${{ matrix.variant }} --clean
 
       - name: Verify packaged archive
         shell: pwsh
         run: |
-          $archive = Join-Path $env:RELEASE_OUTPUT_ROOT "CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z"
+          $archive = "artifacts/release/CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z"
           if (-not (Test-Path -LiteralPath $archive)) {
             throw "Missing packaged archive: $archive"
           }
@@ -142,7 +140,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: release-${{ matrix.variant }}
-          path: ${{ env.RELEASE_OUTPUT_ROOT }}/CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z
+          path: artifacts/release/CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z
           if-no-files-found: error
 
   release:
