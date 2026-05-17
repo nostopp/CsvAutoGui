@@ -4,3 +4,7 @@ screenshot
 record
 config/*/
 ocr_model/*/
+artifacts/
+build/
+dist/
+.build-release/

@@ -122,6 +122,8 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
         log.error(f"ScaleHelper init 失败: {e}")
         raise ValueError(f"ScaleHelper init 失败: scale={args.scale}, offset={args.offset}, scale_image={args.scale_image}") from e
 
+    autogui.ocr.startPreload()
+
     if autogui.backGroundInput.SAVE_SCREENSHOT:
         autogui.backGroundInput.SAVE_SCREENSHOT_PATH = CONFIG_PATH
     if autogui.ocr.SAVE_OCR_FILE:

@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - pyproject.toml
+      - pyproject_cpu.toml
+      - pyproject_gpu.toml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      should_release: ${{ steps.version.outputs.should_release }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Detect release version
+        id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          root = Path(".")
+
+          def read_version(path: Path) -> str:
+              with path.open("rb") as handle:
+                  return tomllib.load(handle)["project"]["version"]
+
+          versions = {
+              "default": read_version(root / "pyproject.toml"),
+              "cpu": read_version(root / "pyproject_cpu.toml"),
+              "gpu": read_version(root / "pyproject_gpu.toml"),
+          }
+          unique_versions = set(versions.values())
+          if len(unique_versions) != 1:
+              formatted = ", ".join(f"{name}={value}" for name, value in versions.items())
+              raise SystemExit(f"Version mismatch across pyproject files: {formatted}")
+
+          version = unique_versions.pop()
+          event_name = os.environ["EVENT_NAME"]
+          before_sha = os.environ.get("BEFORE_SHA", "")
+
+          should_release = True
+          if event_name == "push" and before_sha and before_sha != "0" * 40:
+              previous_pyproject = subprocess.check_output(
+                  ["git", "show", f"{before_sha}:pyproject.toml"],
+                  text=True,
+              )
+              previous_version = tomllib.loads(previous_pyproject)["project"]["version"]
+              should_release = previous_version != version
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"version={version}\n")
+              handle.write(f"tag=v{version}\n")
+              handle.write(f"should_release={'true' if should_release else 'false'}\n")
+          PY
+
+      - name: Show version decision
+        run: |
+          echo "version=${{ steps.version.outputs.version }}"
+          echo "tag=${{ steps.version.outputs.tag }}"
+          echo "should_release=${{ steps.version.outputs.should_release }}"
+
+  build:
+    needs: detect-version
+    if: needs.detect-version.outputs.should_release == 'true'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - cpu
+          - gpu
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install 7-Zip
+        shell: pwsh
+        run: |
+          choco install 7zip -y --no-progress
+          $sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
+          if (-not $sevenZip) {
+            $candidate = Get-ChildItem -LiteralPath 'C:\Program Files', 'C:\Program Files (x86)' -Recurse -Filter '7z.exe' -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+            if (-not $candidate) {
+              throw "7z.exe was not found after installing 7-Zip."
+            }
+            (Split-Path -Path $candidate -Parent) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+      - name: Build ${{ matrix.variant }} release
+        shell: pwsh
+        run: |
+          uv run python scripts/build_release.py --variant ${{ matrix.variant }} --clean
+
+      - name: Verify packaged archive
+        shell: pwsh
+        run: |
+          $archive = "artifacts/release/CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z"
+          if (-not (Test-Path -LiteralPath $archive)) {
+            throw "Missing packaged archive: $archive"
+          }
+          Get-Item -LiteralPath $archive | Select-Object FullName, Length | Format-Table -AutoSize
+
+      - name: Upload packaged archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.variant }}
+          path: artifacts/release/CsvAutoGui-${{ needs.detect-version.outputs.tag }}-${{ matrix.variant }}.7z
+          if-no-files-found: error
+
+  release:
+    needs:
+      - detect-version
+      - build
+    if: needs.detect-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download packaged archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: artifacts/release
+
+      - name: Verify release assets
+        run: ls -lh artifacts/release
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.detect-version.outputs.tag }}
+        shell: bash
+        run: |
+          assets=(
+            "artifacts/release/CsvAutoGui-${TAG}-cpu.7z"
+            "artifacts/release/CsvAutoGui-${TAG}-gpu.7z"
+          )
+
+          for asset in "${assets[@]}"; do
+            test -f "${asset}"
+          done
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${assets[@]}" --clobber
+          else
+            gh release create "${TAG}" "${assets[@]}" --title "${TAG}" --generate-notes
+          fi

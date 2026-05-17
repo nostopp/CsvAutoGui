@@ -4,6 +4,9 @@ import cv2
 import numpy as np
 import time
 import re
+import sys
+import os
+import traceback
 from pathlib import Path
 from .baseInput import BaseInput
 from . import log
@@ -18,6 +21,51 @@ COMPARE_START = ('<;', '<=;', '>;', '>=;', '==;', '!=;')
 def shouldLog():
     return getattr(_thread_local, 'PRINT_LOG', False)
 
+
+def _runtime_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+def _ocr_cache_dir() -> Path:
+    return _runtime_root() / "ocr_model"
+
+
+def _ocr_error_log_path() -> Path:
+    return _runtime_root() / "ocr_preload_error.log"
+
+
+_stdio_fallback_streams = []
+
+
+def _ensure_stdio_streams() -> None:
+    if sys.stdout is None:
+        stream = open(os.devnull, "w", encoding="utf-8", buffering=1)
+        _stdio_fallback_streams.append(stream)
+        sys.stdout = stream
+    if sys.stderr is None:
+        stream = open(os.devnull, "w", encoding="utf-8", buffering=1)
+        _stdio_fallback_streams.append(stream)
+        sys.stderr = stream
+
+
+def _write_preload_error(exc: Exception) -> None:
+    try:
+        error_path = _ocr_error_log_path()
+        error_path.write_text(traceback.format_exc(), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _clear_preload_error() -> None:
+    try:
+        error_path = _ocr_error_log_path()
+        if error_path.exists():
+            error_path.unlink()
+    except Exception:
+        pass
+
 class LazyPaddleOCR:
     _instance = None
     _importLock = threading.Lock()
@@ -25,6 +73,7 @@ class LazyPaddleOCR:
     
     def __init__(self):
         self._ocrEngine = None
+        self._initError = None
         # self._drawOcr = None
         self._startedInit = False
         self._initThread = threading.Thread(target=self.initialize)
@@ -42,8 +91,11 @@ class LazyPaddleOCR:
     def _importPaddleocr(cls):
         with cls._importLock:
             if not cls._imported:
-                import os
-                os.environ['PADDLE_PDX_CACHE_HOME'] = './ocr_model'
+                _ensure_stdio_streams()
+                os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+                cache_dir = _ocr_cache_dir()
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                os.environ['PADDLE_PDX_CACHE_HOME'] = str(cache_dir)
 
                 # print("LazyPaddleOCR: Importing PaddleOCR...")
                 global PaddleOCR#, draw_ocr
@@ -65,21 +117,28 @@ class LazyPaddleOCR:
         if not self._startedInit:
             # print("LazyPaddleOCR: Initializing OCR engine...")
             self._startedInit = True
-            if not LazyPaddleOCR._imported:
-                LazyPaddleOCR._importPaddleocr()  # 触发导入
-            det_name, rec_name = self._resolve_model_settings()
-            self._ocrEngine = PaddleOCR(
-                # lang='ch',
-                text_detection_model_name=det_name,
-                # text_detection_model_dir='ocr_model/det', 
-                text_recognition_model_name=rec_name,
-                # text_recognition_model_dir='ocr_model/rec',
-                use_textline_orientation=False,
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-            )
-            # self._drawOcr = draw_ocr
-            log.info("OCR初始化完成")
+            try:
+                if not LazyPaddleOCR._imported:
+                    LazyPaddleOCR._importPaddleocr()  # 触发导入
+                det_name, rec_name = self._resolve_model_settings()
+                self._ocrEngine = PaddleOCR(
+                    # lang='ch',
+                    text_detection_model_name=det_name,
+                    # text_detection_model_dir='ocr_model/det', 
+                    text_recognition_model_name=rec_name,
+                    # text_recognition_model_dir='ocr_model/rec',
+                    use_textline_orientation=False,
+                    use_doc_orientation_classify=False,
+                    use_doc_unwarping=False,
+                )
+                self._initError = None
+                _clear_preload_error()
+                # self._drawOcr = draw_ocr
+                log.info("OCR初始化完成")
+            except Exception as exc:
+                self._initError = exc
+                _write_preload_error(exc)
+                log.error(f"OCR初始化失败: {exc}")
     
     def getOcr(self):
         if not self._startedInit:
@@ -87,6 +146,8 @@ class LazyPaddleOCR:
         if self._initThread and self._initThread.is_alive():
             # print("LazyPaddleOCR: Waiting for OCR engine to be ready...")
             self._initThread.join()
+        if self._initError is not None:
+            raise RuntimeError(f"OCR initialization failed. See {_ocr_error_log_path()}") from self._initError
         return self._ocrEngine
         
     # def drawOcr(self, image, boxes, texts=None, scores=None):
@@ -95,7 +156,21 @@ class LazyPaddleOCR:
     #     if self._initThread and self._initThread.is_alive():
     #         self._initThread.join()
     #     return self._drawOcr(image, boxes, texts, scores)
-_lazyOcr = LazyPaddleOCR.Instance()
+
+
+class _LazyOcrHandle:
+    def startPreload(self):
+        LazyPaddleOCR.Instance()
+
+    def getOcr(self):
+        return LazyPaddleOCR.Instance().getOcr()
+
+
+_lazyOcr = _LazyOcrHandle()
+
+
+def startPreload():
+    _lazyOcr.startPreload()
 
 def SaveOCRFile(ocrResult, cvImg):
     if ocrResult is None or not ocrResult or cvImg is None:

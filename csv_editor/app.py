@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
+from autogui import ocr as runtime_ocr
+
 from .main_window import EditorMainWindow
 from .theme import apply_editor_theme
 
@@ -24,6 +26,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    runtime_ocr.startPreload()
     app = QApplication(sys.argv if argv is None else ["csv_editor", *argv])
     apply_editor_theme(app)
     window = EditorMainWindow()

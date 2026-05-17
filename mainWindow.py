@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import keyboard
 
+import autogui.ocr
 import main as main_module
 
 
@@ -1213,6 +1214,7 @@ def main():
         return
 
     signal.signal(signal.SIGINT, signal_handler)
+    autogui.ocr.startPreload()
 
     root = tk.Tk()
     MainWindow(root)
