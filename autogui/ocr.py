@@ -36,20 +36,6 @@ def _ocr_error_log_path() -> Path:
     return _runtime_root() / "ocr_preload_error.log"
 
 
-_stdio_fallback_streams = []
-
-
-def _ensure_stdio_streams() -> None:
-    if sys.stdout is None:
-        stream = open(os.devnull, "w", encoding="utf-8", buffering=1)
-        _stdio_fallback_streams.append(stream)
-        sys.stdout = stream
-    if sys.stderr is None:
-        stream = open(os.devnull, "w", encoding="utf-8", buffering=1)
-        _stdio_fallback_streams.append(stream)
-        sys.stderr = stream
-
-
 def _write_preload_error(exc: Exception) -> None:
     try:
         error_path = _ocr_error_log_path()
@@ -91,7 +77,6 @@ class LazyPaddleOCR:
     def _importPaddleocr(cls):
         with cls._importLock:
             if not cls._imported:
-                _ensure_stdio_streams()
                 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
                 cache_dir = _ocr_cache_dir()
                 cache_dir.mkdir(parents=True, exist_ok=True)
