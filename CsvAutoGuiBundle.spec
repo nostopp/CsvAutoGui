@@ -123,6 +123,7 @@ manager_exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    uac_admin=True,
 )
 
 editor_exe = EXE(
@@ -141,6 +142,7 @@ editor_exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    uac_admin=True,
 )
 
 bundle = COLLECT(
