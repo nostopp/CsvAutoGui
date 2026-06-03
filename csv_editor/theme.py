@@ -122,6 +122,12 @@ QPushButton:disabled {
     border-color: #d1dae4;
 }
 
+QDialog#anchoredFieldEditorDialog {
+    background: #f8fbff;
+    border: 1px solid #c8d5e1;
+    border-radius: 14px;
+}
+
 QStatusBar {
     background: #f4f8fc;
     border-top: 1px solid #c9d5e2;
@@ -267,6 +273,18 @@ QComboBox#compactFieldCombo {
     padding: 4px 8px;
     min-height: 0;
     border-radius: 10px;
+}
+
+QLineEdit#popupFieldInput {
+    padding: 6px 10px;
+    border-radius: 10px;
+}
+
+QToolButton#fieldExpandButton {
+    padding: 0;
+    min-width: 18px;
+    min-height: 18px;
+    border-radius: 8px;
 }
 
 QLineEdit:focus,

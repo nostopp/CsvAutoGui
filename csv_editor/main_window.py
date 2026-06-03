@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -1405,6 +1406,139 @@ class ImagePreviewDialog(QDialog):
 
 
 PIC_INLINE_PREVIEW_HEIGHT = 160
+EXPANDABLE_EDITOR_TEXT_COLUMNS = 50
+EXPANDABLE_EDITOR_MIN_WIDTH = 420
+EXPANDABLE_EDITOR_MAX_WIDTH = 560
+EXPANDABLE_EDITOR_ANCHOR_OFFSET = 6
+
+
+class AnchoredLineEditPopup(QDialog):
+    def __init__(self, anchor: QWidget, title: str, value: str) -> None:
+        super().__init__(anchor.window())
+        self._anchor = anchor
+        self._editor = QLineEdit(value, self)
+        self._editor.setObjectName("popupFieldInput")
+        self._editor.selectAll()
+
+        self.setObjectName("anchoredFieldEditorDialog")
+        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        title_label = QLabel(f"编辑 {title}")
+        title_label.setObjectName("panelTitle")
+        layout.addWidget(title_label)
+        layout.addWidget(self._editor)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        editor_metrics = self._editor.fontMetrics()
+        target_width = max(EXPANDABLE_EDITOR_MIN_WIDTH, editor_metrics.horizontalAdvance("M" * EXPANDABLE_EDITOR_TEXT_COLUMNS) + 48)
+        target_width = min(EXPANDABLE_EDITOR_MAX_WIDTH, target_width)
+        self.setFixedWidth(target_width)
+        self.adjustSize()
+        self._reposition()
+
+    def text(self) -> str:
+        return self._editor.text()
+
+    def _reposition(self) -> None:
+        anchor_top_left = self._anchor.mapToGlobal(QPoint(0, 0))
+        anchor_bottom_left = self._anchor.mapToGlobal(QPoint(0, self._anchor.height()))
+        screen = QGuiApplication.screenAt(anchor_top_left)
+        available = screen.availableGeometry() if screen is not None else QGuiApplication.primaryScreen().availableGeometry()
+
+        x = anchor_top_left.x()
+        y = anchor_bottom_left.y() + EXPANDABLE_EDITOR_ANCHOR_OFFSET
+
+        if x + self.width() > available.right():
+            x = max(available.left(), available.right() - self.width())
+        if y + self.height() > available.bottom():
+            y = anchor_top_left.y() - self.height() - EXPANDABLE_EDITOR_ANCHOR_OFFSET
+        if y < available.top():
+            y = max(available.top(), anchor_bottom_left.y() + EXPANDABLE_EDITOR_ANCHOR_OFFSET)
+
+        self.move(x, y)
+
+
+class ExpandableLineEdit(QLineEdit):
+    expandedTextCommitted = Signal()
+
+    def __init__(self, value: str, popup_title: str, parent: QWidget | None = None) -> None:
+        super().__init__(value, parent)
+        self._popup_title = popup_title
+        self._default_margins = self.textMargins()
+
+        self._expand_button = QToolButton(self)
+        self._expand_button.setObjectName("fieldExpandButton")
+        self._expand_button.setCursor(Qt.PointingHandCursor)
+        self._expand_button.setFocusPolicy(Qt.NoFocus)
+        self._expand_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+        self._expand_button.setIconSize(QSize(10, 10))
+        self._expand_button.setToolTip("展开编辑")
+        self._expand_button.hide()
+        self._expand_button.clicked.connect(self._open_popup)
+
+        self.textChanged.connect(self._refresh_expand_button)
+        self._position_expand_button()
+
+    def focusInEvent(self, event) -> None:
+        super().focusInEvent(event)
+        self._refresh_expand_button()
+
+    def focusOutEvent(self, event) -> None:
+        super().focusOutEvent(event)
+        self._refresh_expand_button()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_expand_button()
+        self._refresh_expand_button()
+
+    def _position_expand_button(self) -> None:
+        button_size = max(18, self.height() - 8)
+        self._expand_button.setFixedSize(button_size, button_size)
+        x = max(0, self.width() - button_size - 5)
+        y = max(0, (self.height() - button_size) // 2)
+        self._expand_button.move(x, y)
+
+    def _open_popup(self) -> None:
+        popup = AnchoredLineEditPopup(self, self._popup_title, self.text())
+        if popup.exec() == QDialog.Accepted:
+            new_text = popup.text()
+            if new_text != self.text():
+                self.setText(new_text)
+                self.expandedTextCommitted.emit()
+        self.setFocus(Qt.MouseFocusReason)
+        self._refresh_expand_button()
+
+    def _refresh_expand_button(self) -> None:
+        should_show = self.hasFocus() and self._text_overflows()
+        self._expand_button.setVisible(should_show)
+        right_margin = self._expand_button.width() + 8 if should_show else self._default_margins.right()
+        self.setTextMargins(
+            self._default_margins.left(),
+            self._default_margins.top(),
+            right_margin,
+            self._default_margins.bottom(),
+        )
+
+    def _text_overflows(self) -> bool:
+        text = self.text()
+        if not text:
+            return False
+
+        contents = self.contentsRect()
+        available_width = contents.width() - self._default_margins.left() - self._default_margins.right() - 6
+        if available_width <= 0:
+            return False
+        return self.fontMetrics().horizontalAdvance(text) > available_width
 
 
 class PicInlinePreviewLabel(QLabel):
@@ -1630,11 +1764,11 @@ class NodeInspector(QWidget):
         self._widgets["operation"] = operation_combo
         self._add_grid_field(common_form, 0, 0, "操作类型", operation_combo)
 
-        self._widgets["jump_mark"] = self._line_edit(common_form, 0, 1, "跳转标记", node.jump_mark)
+        self._widgets["jump_mark"] = self._line_edit(common_form, 0, 1, "跳转标记", node.jump_mark, expandable=True)
         self._widgets["wait_value"] = self._line_edit(common_form, 1, 0, "等待时间", node.wait_value)
         self._widgets["wait_random"] = self._line_edit(common_form, 1, 1, "等待随机", node.wait_random)
         self._widgets["move_time"] = self._line_edit(common_form, 2, 0, "移动用时", node.move_time)
-        self._widgets["note"] = self._line_edit(common_form, 2, 1, "备注", node.note)
+        self._widgets["note"] = self._line_edit(common_form, 2, 1, "备注", node.note, expandable=True)
         self.layout.addWidget(common_group)
 
         self.layout.addWidget(self._build_operation_group(node))
@@ -1689,8 +1823,8 @@ class NodeInspector(QWidget):
 
         if operation in {OperationType.PIC.value, OperationType.OCR.value}:
             target_label = "图片文件" if operation == OperationType.PIC.value else "OCR 文本"
-            self._widgets["search_target"] = self._line_edit(form, 0, 0, target_label, node.search_target)
-            self._widgets["region_text"] = self._line_edit(form, 0, 1, "搜索区域", node.region_text)
+            self._widgets["search_target"] = self._line_edit(form, 0, 0, target_label, node.search_target, expandable=True)
+            self._widgets["region_text"] = self._line_edit(form, 0, 1, "搜索区域", node.region_text, expandable=True)
             self._widgets["confidence_text"] = self._line_edit(form, 1, 0, "置信度", node.confidence_text)
             self._widgets["retry_value"] = self._line_edit(form, 1, 1, "重试时间", node.retry_value)
             self._widgets["retry_random"] = self._line_edit(form, 2, 0, "重试随机", node.retry_random)
@@ -1778,11 +1912,27 @@ class NodeInspector(QWidget):
         layout.addWidget(widget)
         form.addWidget(container, row, column, 1, span)
 
-    def _line_edit(self, form: QGridLayout, row: int, column: int, label: str, value: str, *, span: int = 1) -> QLineEdit:
-        edit = QLineEdit(value)
+    def _line_edit(
+        self,
+        form: QGridLayout,
+        row: int,
+        column: int,
+        label: str,
+        value: str,
+        *,
+        span: int = 1,
+        expandable: bool = False,
+    ) -> QLineEdit:
+        edit: QLineEdit
+        if expandable:
+            edit = ExpandableLineEdit(value, label)
+        else:
+            edit = QLineEdit(value)
         self._normalize_field(edit)
         edit.setObjectName("compactFieldInput")
         edit.editingFinished.connect(self._emit_change)
+        if isinstance(edit, ExpandableLineEdit):
+            edit.expandedTextCommitted.connect(self._emit_change)
         self._add_grid_field(form, row, column, label, edit, span=span)
         return edit
 
