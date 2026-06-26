@@ -24,6 +24,7 @@
    ```powershell
    uv run python -m csv_editor
    ```
+5. 修改 CSV、`script` 脚本或 `*_resource.csv` 后，需要手动执行界面里的“重新加载”来刷新配置缓存。
 
 ### 运行参数
 
@@ -69,13 +70,13 @@
 | 操作 | 本次执行的操作，具体内容见下表 | pic |
 | 操作参数 | 本次操作的参数，具体内容见下表 | test.png |
 | 完成后等待时间 | 操作完成后的等待时间，分号可加入随机等待时间 | 2 / 2;0.5 |
-| 图片/ocr名称 | `pic` 操作时图片名称（需带后缀，放在配置文件同目录）；`ocr` 操作时要识别的目标文字。若包含数字内容，支持比较大小（<; <=; >; >=; ==; !=;） | test.png / 需识别文字,数字比对<=;1000 |
-| 图片/ocr坐标范围 | `pic` 或 `ocr` 操作时识别的屏幕坐标范围，格式为 `起始点x;起始点y;宽;高`，可用截图模式快速定位 | 0;0;1920;1080 |
-| 图片/ocr置信度 | `pic` 或 `ocr` 操作时的识别置信度（0-1） | 0.8 |
+| 图片/ocr名称 | `pic` 操作时图片名称（需带后缀，放在配置文件同目录）；`ocr` 操作时要识别的目标文字。`resource(pic;alias)` / `resource(ocr;alias)` 也复用这一列。若包含数字内容，支持比较大小（<; <=; >; >=; ==; !=;） | test.png / 需识别文字,数字比对<=;1000 |
+| 图片/ocr坐标范围 | `pic` 或 `ocr` 操作时识别的屏幕坐标范围，格式为 `起始点x;起始点y;宽;高`，可用截图模式快速定位；资源文件中的 `resource(pic;alias)` / `resource(ocr;alias)` 也复用这一列 | 0;0;1920;1080 |
+| 图片/ocr置信度 | `pic` 或 `ocr` 操作时的识别置信度（0-1）；资源文件中的 `resource(pic;alias)` / `resource(ocr;alias)` 也复用这一列 | 0.8 |
 | 未找到图片/ocr重试时间 | 未找到目标时且未配置 notExist 参数时的重试时间，支持分号加入随机延迟 | 1 / 1;0.5 |
 | 图片/ocr定位移动随机 | 搜索到目标且未使用 exist 等参数时，移动到图片范围中的随机位置 | 1 |
 | 移动操作用时 | `mMove` `mMoveTo` `pic` `ocr` 等各种涉及到鼠标移动操作时可控制移动到目标点的用时 | 1 |
-| 跳转标记 | `pic` `ocr` 等涉及到跳转的操作参数时可用的跳转标记 | 标记名 |
+| 跳转标记 | `pic` `ocr` `jmp` 等涉及到跳转的操作参数时可用的跳转标记；`resource(jmp;alias)` 使用这一列保存脚本可映射到的真实跳转目标（标记或序号） | 标记名 |
 | 图片不使用灰度匹配 | `pic` 匹配时,填1不使用灰度匹配 | 留空 / 1 |
 | 备注 | 对该行的备注,仅供编辑csv时查看 | 点击图标 |
 
@@ -96,10 +97,112 @@
 | write | text | 键盘输入（参数必须） |
 | pic | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | 识图 |
 | ocr | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | OCR 识别 |
+| script | script.py / script.py;name_resource.csv | 运行配置目录中的 Python 脚本，入口固定为 `run(ctx)` |
+| resource | pic;alias / ocr;alias / jmp;alias | 仅用于 `*_resource.csv`，声明脚本可读取的图片、OCR 或跳转资源 |
 | notify | text | 通知 |
-| jmp | index | 跳转 |
+| jmp | index / 标记 | 跳转 |
 
 ---
+
+## Script / Resource 用法
+
+- `script` 节点只允许出现在普通流程 CSV 中，例如 `main.csv`。
+- `script` 的 `操作参数` 支持两种格式：
+  - `fishing.py`
+  - `fishing.py;fishing_resource.csv`
+- 当 `script` 没有显式指定资源文件时，会默认查找同目录下的 `fishing_resource.csv`。默认资源文件不存在时不会报错；显式写出的资源文件不存在时，编辑器校验会直接报错。
+- 资源文件命名约定为 `*_resource.csv`。这类文件不会被当作普通子流程执行，只用于给 `script` 提供资源。
+- `*_resource.csv` 中只允许使用 `resource` 节点：
+  - `resource` + `pic;fish`：通过 `图片/ocr名称`、`图片/ocr坐标范围`、`图片/ocr置信度` 声明一个图片资源
+  - `resource` + `ocr;meter_text`：通过同样的列声明一个 OCR 资源
+  - `resource` + `jmp;finish`：通过 `跳转标记` 列声明脚本内部别名到真实跳转目标的映射，真实目标可以是标记名或序号
+- 编辑器中打开 `*_resource.csv` 时，只能新增 `resource` 节点；`resource(pic;alias)` 和 `resource(ocr;alias)` 仍然可以继续使用截图回填和 OCR 区域采集能力。
+- 当前版本不会自动检测脚本或资源文件变更。修改 `.py`、`*.csv`、`*_resource.csv` 后，都需要手动点击“重新加载”。
+- 这次手动重载的含义是“重载配置”：会一起刷新 CSV 解析缓存、脚本缓存和资源文件缓存。
+
+### Script 编写建议
+
+- 虽然脚本入口固定是 `run(ctx)`，但实际编写时推荐继承 `ScriptBase`，把控制流返回交给基类 helper 处理，不要直接手写三元组。
+- 推荐写法：
+
+```python
+from autogui.script_runtime import ScriptBase
+
+
+class ExampleScript(ScriptBase):
+    def run(self):
+        self.ctx.log.info("脚本开始执行")
+        match = self.ctx.find_image(resource="sample_pic")
+        if match is None:
+            self.ctx.sleep(0.2)
+            return self.next_step()
+        return self.jump_resource("finish")
+
+
+def run(ctx):
+    return ExampleScript(ctx).run()
+```
+
+### `ScriptBase` API
+
+- `self.ctx`
+  - 当前脚本上下文对象，几乎所有运行时能力都从这里取。
+- `self.jump(target)`
+  - 跳到当前调用脚本的 CSV 中某个真实目标。`target` 可以是跳转标记或序号。
+- `self.jump_resource(name)`
+  - 读取 `resource(jmp;name)` 对应的真实目标并跳转。适合把脚本逻辑和真实跳转标记解耦。
+- `self.next_step()`
+  - 正常返回到解释器，继续执行脚本节点的下一行。
+- `self.start_subflow(file_name)`
+  - 启动一个普通子流程 CSV，然后继续执行下一行。不能传 `*_resource.csv`。
+
+### `ctx` 属性
+
+- `ctx.config_dir`
+  - 当前配置目录路径字符串。
+- `ctx.node`
+  - 当前 `script` 节点对应的运行时字典，可读取当前节点索引、原始参数等信息。
+- `ctx.input`
+  - 当前实例实际使用的输入对象。前台模式和后台模式都会从这里透传。
+  - 常用低级方法包括：`click`、`moveTo`、`moveRel`、`mouseDown`、`mouseUp`、`press`、`keyDown`、`keyUp`、`hotkey`。
+- `ctx.scale_helper`
+  - 当前实例的缩放辅助对象，通常只有脚本确实要处理缩放细节时才需要直接使用。
+- `ctx.log`
+  - 日志模块，常用方法：`info(msg)`、`debug(msg)`、`warning(msg)`、`error(msg)`。
+- `ctx.state`
+  - 当前实例级共享字典。主流程、子流程、脚本之间共享，用于保存运行中状态。
+- `ctx.resources`
+  - 当前脚本已加载的资源映射，键是资源变量名，值是 `ResourceSpec`。
+
+### `ctx` 方法
+
+- `ctx.resolve_path(path)`
+  - 将相对配置目录路径解析为绝对路径；超出配置目录会直接报错。
+- `ctx.get_resource(name)`
+  - 读取资源对象。返回的 `ResourceSpec` 常用字段有：
+  - `kind`：`pic` / `ocr` / `jmp`
+  - `name`：资源变量名
+  - `search_target`：图片文件名或 OCR 文本
+  - `region`：识别区域
+  - `confidence`：置信度
+  - `jump_target`：`jmp` 资源对应的真实目标
+  - `disable_grayscale`：图片资源是否禁用灰度匹配
+- `ctx.get_jump_target(name)`
+  - 读取某个 `jmp` 资源映射出来的真实跳转目标，但不立即跳转。
+- `ctx.resolve_jump_target(target)`
+  - 手动把标记或序号解析成当前流程里的真实下一步序号。
+- `ctx.start_subflow(file_name)`
+  - 直接启动一个普通子流程。若你只想“启动后继续下一步”，更推荐用 `self.start_subflow(...)`。
+- `ctx.find_image(resource="...", name="...", region=..., confidence=..., grayscale=...)`
+  - 查找图片。优先推荐传 `resource="资源变量名"`，这样图片名、区域、置信度都从资源文件读取。
+  - 返回 `None` 表示未命中；命中时返回带 `x`、`y`、`center_x`、`center_y`、`width`、`height`、`confidence` 的对象。
+- `ctx.find_text(resource="...", text="...", region=..., confidence=...)`
+  - OCR 查找文本。推荐优先传 `resource="资源变量名"`。
+  - 返回值规则与 `find_image` 一致。
+- `ctx.screenshot(region=None)`
+  - 获取当前截图。传 `region` 时会裁出对应区域并返回。
+- `ctx.sleep(seconds)`
+  - 脚本内等待指定秒数。
 
 ## 其他说明
 

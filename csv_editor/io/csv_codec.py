@@ -23,6 +23,37 @@ from csv_schema import (
     CSV_COLUMNS,
 )
 
+RESOURCE_FILE_SUFFIX = "_resource.csv"
+RESOURCE_PARAM_KINDS = {"pic", "ocr", "jmp"}
+
+
+def is_resource_flow_filename(filename: str) -> bool:
+    return filename.lower().endswith(RESOURCE_FILE_SUFFIX)
+
+
+def infer_default_resource_filename(script_filename: str) -> str:
+    script_name = Path(script_filename.strip()).stem
+    return f"{script_name}{RESOURCE_FILE_SUFFIX}"
+
+
+def parse_script_param(param_text: str) -> tuple[str, str | None] | None:
+    parts = [part.strip() for part in param_text.split(";")]
+    if len(parts) == 1 and parts[0]:
+        return parts[0], None
+    if len(parts) == 2 and parts[0] and parts[1]:
+        return parts[0], parts[1]
+    return None
+
+
+def parse_resource_param(param_text: str) -> tuple[str, str] | None:
+    parts = [part.strip() for part in param_text.split(";")]
+    if len(parts) != 2:
+        return None
+    kind, alias = parts
+    if kind not in RESOURCE_PARAM_KINDS or not alias:
+        return None
+    return kind, alias
+
 
 class CsvEditorCodec:
     def load_document(self, root_path: Path) -> EditorDocument:

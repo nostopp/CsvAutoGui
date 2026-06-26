@@ -13,11 +13,12 @@ from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
 from .baseInput import BaseInput
+from .script_runtime import execute_script_node
 
 CONFIDENCE_PATTERN = re.compile(r'confidence\s*=\s*([\d.-]+)')
 
 class AutoOperator:
-    def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, input:BaseInput, scaleHelper : ScaleHelper,  loop : bool = False, printLog : bool = False):
+    def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, input:BaseInput, scaleHelper : ScaleHelper,  loop : bool = False, printLog : bool = False, sharedState:dict|None = None):
         self._operateDict = operateDict
         self._operateIndex = 1
         self._configPath = configPath
@@ -26,12 +27,15 @@ class AutoOperator:
         self._scaleHelper = scaleHelper
         self._loop = loop
         self._printLog = printLog
+        self._sharedState = {} if sharedState is None else sharedState
         self._jumpMarks = dict()
         for index, operation in operateDict.items():
             if 'jump_mark' in operation:
                 self._jumpMarks[operation['jump_mark']] = index
 
     def _start_sub_operator(self, file_name: str):
+        if file_name.lower().endswith('_resource.csv'):
+            raise ValueError(f'资源文件不能作为子流程执行: {file_name}')
         if self._printLog:
             log.debug(f'启动配置 {file_name}')
         self._subOperatorList.append(
@@ -43,6 +47,7 @@ class AutoOperator:
                 self._scaleHelper,
                 False,
                 self._printLog,
+                self._sharedState,
             )
         )
 
@@ -87,6 +92,31 @@ class AutoOperator:
         startX = center_x - width / 2
         startY = center_y - height / 2
         self._input.moveTo(int(startX + random.random() * width), int(startY + random.random() * height), operation.get('move_time', None))
+
+    def _resolve_script_jump(self, target: int | str) -> int:
+        jump = self.Jump(target)
+        if isinstance(jump, str):
+            try:
+                jump = int(jump)
+            except Exception:
+                pass
+
+        if not isinstance(jump, int) or jump not in self._operateDict:
+            raise KeyError(f'无效的跳转目标: {target}')
+
+        return jump
+
+    def _run_script(self, operation: dict):
+        return execute_script_node(
+            operation,
+            self._configPath,
+            self._input,
+            self._scaleHelper,
+            self._sharedState,
+            self._resolve_script_jump,
+            self._start_sub_operator,
+            self._printLog,
+        )
 
     def Update(self) -> bool:
         if len(self._operateDict) <= 0:
@@ -274,6 +304,10 @@ class AutoOperator:
                 if self._printLog:
                     log.debug(f'跳转 {operateParam}, 实际跳转到 {jmp}')
                 return None, lambda x : jmp, None
+            case 'script':
+                operationWait, indexChangeFunc, operationWaitRandom = self._run_script(operation)
+            case 'resource':
+                raise Exception(f"{operation['index']},{operation['operate']} 只能在 _resource.csv 中使用")
 
         return operationWait, indexChangeFunc, operationWaitRandom
 

@@ -13,3 +13,5 @@ from .baseInput import BaseInput
 from .frontGroundInput import FrontGroundInput
 from .backGroundInput import BackGroundInput
 from .recordMode import RecordMode
+from .script_runtime import ScriptBase, ScriptContext, clear_script_cache
+from .resource_loader import clear_resource_cache

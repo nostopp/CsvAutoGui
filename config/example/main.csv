@@ -1,19 +1,10 @@
-序号,操作,操作参数,完成后等待时间,图片/ocr名称,图片/ocr坐标范围,图片/ocr置信度,未找到图片/ocr重试时间,图片/ocr定位移动随机,移动操作用时,跳转标记,备注
-1,pic,,0.2,0524134151_1723;722;61;46.png,1924;740;259;27,0.8,1,,,,
-2,click,left,1,,,,,,,,
-3,pic,,0.2,xxx.png,2312;1308;179;44,0.8,1,,,,
-4,click,left,2,,,,,,,,
-5,pic,notExist;idle.csv,1,xxx.png,2290;1344;132;62,0.8,1,,,,
-6,kDown,w,0.5,,,,,,,,
-7,kDown,shift,0.5,,,,,,,,
-8,kUp,shift,1.5,,,,,,,,
-9,kUp,w,0.5,,,,,,,,
-10,kDown,s,0.5,,,,,,,,
-11,kUp,s,1.2,,,,,,,,
-12,kDown,e,0.05,,,,,,,,
-13,kUp,e,0.2,,,,,,,,
-14,kDown,e,0.05,,,,,,,,
-15,kUp,e,0.2,,,,,,,,
-16,pic,notExist;choose.csv,1,xxx.png,1080;1273;360;66,0.8,1,,,,
-17,pic,,1,xxx.png,1080;1273;360;66,0.8,1,,,,
-18,click,left,0.5,,,,,,,,
+序号,操作,操作参数,完成后等待时间,图片/ocr名称,图片/ocr坐标范围,图片/ocr置信度,未找到图片/ocr重试时间,图片/ocr定位移动随机,移动操作用时,跳转标记,图片不使用灰度匹配,备注
+1,notify,示例主流程开始,0.2,,,,,,,,,主流程入口
+2,pic,exist;input_actions.csv,0.2,0524134151_1723;722;61;46.png,1723;722;61;46,0.8,0.5,,,,,找到图时进入输入示例子流程
+3,pic,notExist;ocr_and_jump.csv,0.2,0524134151_1723;722;61;46.png,1723;722;61;46,0.8,0.5,,,,,未找到图时进入 OCR 与跳转示例子流程
+4,script,example_script.py,0.2,,,,,,,,,script 默认加载 example_script_resource.csv
+5,script,example_script.py;example_script_resource.csv,0.2,,,,,,,,,script 显式指定资源文件
+6,script,example_script.py,0.2,,,,,,,,,第三次执行脚本时演示 jump_resource
+7,notify,如果第三次脚本没有跳转会先看到这行,0.2,,,,,,,,,给 next_step / start_subflow 对照使用
+8,notify,这一行通常会被第三次脚本跳过,0.2,,,,,,,,,给 jump_resource 对照使用
+9,notify,示例主流程结束,0.2,,,,,,,after_script,,脚本跳转落点

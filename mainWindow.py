@@ -547,7 +547,7 @@ class MainWindow:
 
         self.btn_reload_csv = ttk.Button(footer_left, text="重载 CSV", style="Secondary.TButton", command=self.reload_csv)
         self.btn_reload_csv.grid(row=0, column=1, padx=(0, 8))
-        Tooltip(self.btn_reload_csv, "停止所有实例后重新加载 CSV")
+        Tooltip(self.btn_reload_csv, "停止所有实例后重新加载 CSV、脚本和资源缓存")
 
         self.btn_save = ttk.Button(footer_left, text="保存参数", style="Secondary.TButton", command=self.save_params)
         self.btn_save.grid(row=0, column=2, padx=(0, 8))
@@ -1110,12 +1110,15 @@ class MainWindow:
 
     def reload_csv(self):
         try:
+            import autogui
             import autogui.parser as parser
 
             if messagebox.askyesno("确认", "重载 CSV 需要停止所有实例，是否继续？"):
                 self.stop_all()
                 parser.csvDataDict.clear()
-                self._set_status("CSV 缓存已清空，后续运行将重新加载")
+                autogui.clear_script_cache()
+                autogui.clear_resource_cache()
+                self._set_status("CSV、脚本和资源缓存已清空，后续运行将重新加载")
         except Exception as exc:
             messagebox.showerror("重载失败", f"无法重载 CSV：{exc}")
 

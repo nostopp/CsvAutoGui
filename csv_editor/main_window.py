@@ -46,7 +46,7 @@ from csv_editor.adapters import RuntimeOcrPreviewAdapter
 from csv_editor.domain.enums import BranchMode, BranchTrigger, OperationType, ValidationSeverity
 from csv_editor.domain.models import BranchConfig, EditorDocument, FlowDocument, OperationNode, ValidationIssue
 from csv_editor.io.assets import save_capture_image
-from csv_editor.io.csv_codec import CsvEditorCodec
+from csv_editor.io.csv_codec import CsvEditorCodec, is_resource_flow_filename, parse_resource_param, parse_script_param
 from csv_editor.io.node_clipboard import (
     CLIPBOARD_MIME_TYPE,
     CLIPBOARD_TEXT_PREFIX,
@@ -426,14 +426,14 @@ class EditorMainWindow(QMainWindow):
         flow = self.current_flow
         if not flow:
             self.node_table.blockSignals(False)
-            self.inspector.set_reference_data([], [])
+            self.inspector.set_reference_data([], [], None)
             self.inspector.set_node(None)
             return
 
         flow.reindex()
         jump_targets = list(flow.jump_marks().keys())
-        subflow_targets = list(self.document.iter_flow_filenames()) if self.document else []
-        self.inspector.set_reference_data(jump_targets, subflow_targets)
+        subflow_targets = [name for name in self.document.iter_flow_filenames() if not is_resource_flow_filename(name)] if self.document else []
+        self.inspector.set_reference_data(jump_targets, subflow_targets, flow.filename)
         issue_node_ids = {issue.node_id for issue in self.issues if issue.flow_name == flow.filename and issue.node_id}
         self.node_table.clearSelection()
         self.node_table.setRowCount(len(flow.nodes))
@@ -442,8 +442,8 @@ class EditorMainWindow(QMainWindow):
             type_item = QTableWidgetItem(node.operation)
             jump_mark_item = QTableWidgetItem(node.jump_mark)
             target_item = QTableWidgetItem(self._format_target_references(node))
-            summary_title = summarize_node(node)
-            summary_detail = summarize_node_timing(node)
+            summary_title = _summarize_editor_node(node)
+            summary_detail = _summarize_editor_timing(node, flow.filename)
             summary_item = QTableWidgetItem(summary_title)
             summary_item.setData(SUMMARY_TITLE_ROLE, summary_title)
             summary_item.setData(SUMMARY_DETAIL_ROLE, summary_detail)
@@ -461,7 +461,7 @@ class EditorMainWindow(QMainWindow):
                 target_item.setToolTip(f"{target_item.text()}\n{target_tip}")
             elif target_item.text():
                 target_item.setToolTip(target_item.text())
-            summary_item.setToolTip(f"{summary_title}\n{summary_detail}")
+            summary_item.setToolTip(summary_title if not summary_detail else f"{summary_title}\n{summary_detail}")
             self._apply_node_table_style(
                 node,
                 issue_node_ids,
@@ -547,7 +547,7 @@ class EditorMainWindow(QMainWindow):
 
     def _resolvable_target_references(self, node: OperationNode) -> list[tuple[str, str]]:
         flow = self.current_flow
-        if not flow:
+        if not flow or is_resource_flow_filename(flow.filename):
             return []
         targets: list[tuple[str, str]] = []
         for label, target in self._target_references(node):
@@ -558,6 +558,10 @@ class EditorMainWindow(QMainWindow):
     def _target_references(self, node: OperationNode) -> list[tuple[str, str]]:
         if node.operation == OperationType.JUMP.value and node.param_text.strip():
             return [("jmp", node.param_text.strip())]
+        if node.operation == OperationType.RESOURCE.value:
+            parsed = parse_resource_param(node.param_text.strip())
+            if parsed is not None and parsed[0] == "jmp" and node.jump_mark.strip():
+                return [(f"jmp {parsed[1]}", node.jump_mark.strip())]
         if node.operation in {OperationType.PIC.value, OperationType.OCR.value} and node.branch.is_enabled:
             if node.branch.mode is BranchMode.JUMP_PAIR:
                 trigger = node.branch.trigger.value
@@ -812,7 +816,7 @@ class EditorMainWindow(QMainWindow):
         flow = self.current_flow
         if not flow:
             return
-        choices = [item.value for item in OperationType]
+        choices = _allowed_operations_for_flow(flow.filename)
         operation, ok = QInputDialog.getItem(self, "新增节点", "操作类型", choices, editable=False)
         if not ok or not operation:
             return
@@ -950,7 +954,7 @@ class EditorMainWindow(QMainWindow):
         hint_map = [
             (self.open_action, "打开配置目录"),
             (self.save_action, "保存当前 CSV"),
-            (self.reload_action, "重新加载当前配置目录"),
+            (self.reload_action, "重新加载当前配置目录（包括脚本和资源文件缓存）"),
             (self.import_nodes_action, "从其他自动化选择节点并复制到剪贴板"),
             (self.record_nodes_action, "录制键鼠操作和 OCR/PIC 标记并复制成节点"),
             (self.scan_unused_images_action, "扫描当前配置目录下未使用的图片"),
@@ -1627,6 +1631,8 @@ def _operation_color(operation: str) -> QColor:
     colors = {
         OperationType.PIC.value: QColor("#2563eb"),
         OperationType.OCR.value: QColor("#7c3aed"),
+        OperationType.SCRIPT.value: QColor("#0f766e"),
+        OperationType.RESOURCE.value: QColor("#b45309"),
         OperationType.CLICK.value: QColor("#059669"),
         OperationType.MOUSE_DOWN.value: QColor("#059669"),
         OperationType.MOUSE_UP.value: QColor("#059669"),
@@ -1640,6 +1646,42 @@ def _operation_color(operation: str) -> QColor:
         OperationType.NOTIFY.value: QColor("#ca8a04"),
     }
     return colors.get(operation, QColor("#71717a"))
+
+
+def _allowed_operations_for_flow(flow_filename: str | None) -> list[str]:
+    if flow_filename and is_resource_flow_filename(flow_filename):
+        return [OperationType.RESOURCE.value]
+    return [item.value for item in OperationType if item is not OperationType.RESOURCE]
+
+
+def _summarize_editor_node(node: OperationNode) -> str:
+    if node.operation == OperationType.SCRIPT.value:
+        parsed = parse_script_param(node.param_text.strip())
+        if parsed is None:
+            return f"运行脚本 {node.param_text or '(未设置)'}"
+        script_name, resource_name = parsed
+        if resource_name:
+            return f"运行脚本 {script_name}，资源 {resource_name}"
+        return f"运行脚本 {script_name}"
+
+    if node.operation == OperationType.RESOURCE.value:
+        parsed = parse_resource_param(node.param_text.strip())
+        if parsed is None:
+            return f"资源声明 {node.param_text or '(未设置)'}"
+        kind, alias = parsed
+        if kind == "pic":
+            return f"图片资源 {alias} -> {node.search_target or '(未设置)'}"
+        if kind == "ocr":
+            return f"OCR 资源 {alias} -> {node.search_target or '(未设置)'}"
+        return f"跳转资源 {alias} -> {node.jump_mark or '(未设置)'}"
+
+    return summarize_node(node)
+
+
+def _summarize_editor_timing(node: OperationNode, flow_filename: str) -> str:
+    if node.operation == OperationType.RESOURCE.value or is_resource_flow_filename(flow_filename):
+        return ""
+    return summarize_node_timing(node)
 
 
 def resolve_target_node(flow: FlowDocument, target: str) -> OperationNode | None:
@@ -1674,6 +1716,7 @@ class NodeInspector(QWidget):
         self._widgets: dict[str, QWidget] = {}
         self._jump_target_options: list[str] = []
         self._subflow_options: list[str] = []
+        self._flow_filename: str | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1690,9 +1733,10 @@ class NodeInspector(QWidget):
         self.layout.setAlignment(Qt.AlignTop)
         self.layout.addWidget(QLabel("请选择一个节点"))
 
-    def set_reference_data(self, jump_targets: list[str], subflow_targets: list[str]) -> None:
+    def set_reference_data(self, jump_targets: list[str], subflow_targets: list[str], flow_filename: str | None) -> None:
         self._jump_target_options = jump_targets
         self._subflow_options = subflow_targets
+        self._flow_filename = flow_filename
 
     def set_root_path(self, root_path: Path | None) -> None:
         self._root_path = root_path
@@ -1757,23 +1801,40 @@ class NodeInspector(QWidget):
         operation_combo = QComboBox()
         self._normalize_combo(operation_combo)
         operation_combo.setObjectName("compactFieldCombo")
-        for item in OperationType:
-            operation_combo.addItem(item.value)
+        for value in self._available_operation_choices(node.operation):
+            operation_combo.addItem(value)
         operation_combo.setCurrentText(node.operation)
         operation_combo.currentTextChanged.connect(self._emit_change)
         self._widgets["operation"] = operation_combo
         self._add_grid_field(common_form, 0, 0, "操作类型", operation_combo)
-
-        self._widgets["jump_mark"] = self._line_edit(common_form, 0, 1, "跳转标记", node.jump_mark, expandable=True)
-        self._widgets["wait_value"] = self._line_edit(common_form, 1, 0, "等待时间", node.wait_value)
-        self._widgets["wait_random"] = self._line_edit(common_form, 1, 1, "等待随机", node.wait_random)
-        self._widgets["move_time"] = self._line_edit(common_form, 2, 0, "移动用时", node.move_time)
-        self._widgets["note"] = self._line_edit(common_form, 2, 1, "备注", node.note, expandable=True)
+        next_row, next_column = 0, 1
+        if self._should_show_jump_mark(node):
+            self._widgets["jump_mark"] = self._line_edit(common_form, next_row, next_column, "跳转标记", node.jump_mark, expandable=True)
+            next_row, next_column = 1, 0
+        if node.operation != OperationType.RESOURCE.value:
+            self._widgets["wait_value"] = self._line_edit(common_form, next_row, next_column, "等待时间", node.wait_value)
+            self._widgets["wait_random"] = self._line_edit(common_form, next_row, 1, "等待随机", node.wait_random)
+            self._widgets["move_time"] = self._line_edit(common_form, next_row + 1, 0, "移动用时", node.move_time)
+            self._widgets["note"] = self._line_edit(common_form, next_row + 1, 1, "备注", node.note, expandable=True)
+        else:
+            self._widgets["note"] = self._line_edit(common_form, next_row, next_column, "备注", node.note, expandable=True)
         self.layout.addWidget(common_group)
 
         self.layout.addWidget(self._build_operation_group(node))
         self.layout.addStretch(1)
         self._building = False
+
+    def _available_operation_choices(self, current_operation: str) -> list[str]:
+        choices = _allowed_operations_for_flow(self._flow_filename)
+        if current_operation and current_operation not in choices:
+            return [current_operation, *choices]
+        return choices
+
+    def _should_show_jump_mark(self, node: OperationNode) -> bool:
+        if node.operation != OperationType.RESOURCE.value:
+            return True
+        parsed = parse_resource_param(node.param_text.strip())
+        return parsed is not None and parsed[0] == "jmp"
 
     def _build_operation_group(self, node: OperationNode) -> QWidget:
         operation = node.operation
@@ -1805,6 +1866,7 @@ class NodeInspector(QWidget):
             OperationType.WRITE.value,
             OperationType.NOTIFY.value,
             OperationType.JUMP.value,
+            OperationType.SCRIPT.value,
         }:
             label = "参数"
             if operation in {OperationType.MOVE_REL.value, OperationType.MOVE_TO.value}:
@@ -1813,12 +1875,62 @@ class NodeInspector(QWidget):
                 label = "文本"
             elif operation == OperationType.JUMP.value:
                 label = "跳转目标"
+            elif operation == OperationType.SCRIPT.value:
+                label = "脚本文件;资源文件"
             if operation == OperationType.MOVE_TO.value:
                 self._widgets["param_text"] = self._line_with_button(form, 0, 0, label, node.param_text, "取点", "pick_point")
             elif operation == OperationType.JUMP.value:
                 self._widgets["param_text"] = self._editable_combo(form, 0, 0, label, node.param_text, self._jump_target_options, span=2)
             else:
                 self._widgets["param_text"] = self._line_edit(form, 0, 0, label, node.param_text, span=2)
+            return group
+
+        if operation == OperationType.RESOURCE.value:
+            parsed = parse_resource_param(node.param_text.strip())
+            resource_kind = parsed[0] if parsed is not None else "pic"
+            resource_alias = parsed[1] if parsed is not None else ""
+
+            kind_combo = QComboBox()
+            self._normalize_combo(kind_combo)
+            kind_combo.setObjectName("compactFieldCombo")
+            for item in ["pic", "ocr", "jmp"]:
+                kind_combo.addItem(item)
+            kind_combo.setCurrentText(resource_kind)
+            kind_combo.currentTextChanged.connect(self._emit_change)
+            self._widgets["resource_kind"] = kind_combo
+            self._add_grid_field(form, 0, 0, "资源类型", kind_combo)
+            self._widgets["resource_alias"] = self._line_edit(form, 0, 1, "脚本变量名", resource_alias, expandable=True)
+
+            if resource_kind in {"pic", "ocr"}:
+                target_label = "图片文件" if resource_kind == "pic" else "OCR 文本"
+                self._widgets["search_target"] = self._line_edit(form, 1, 0, target_label, node.search_target, expandable=True)
+                self._widgets["region_text"] = self._line_edit(form, 1, 1, "搜索区域", node.region_text, expandable=True)
+                self._widgets["confidence_text"] = self._line_edit(form, 2, 0, "置信度", node.confidence_text)
+
+                if resource_kind == "pic":
+                    grayscale_checkbox = QCheckBox()
+                    grayscale_checkbox.setChecked(node.disable_grayscale)
+                    grayscale_checkbox.stateChanged.connect(self._emit_change)
+                    self._widgets["disable_grayscale"] = grayscale_checkbox
+                    self._add_grid_field(form, 2, 1, "禁用灰度匹配", grayscale_checkbox)
+                    self._add_grid_field(form, 3, 0, "辅助采集", self._action_button("截图并回填", "capture_pic"), span=2)
+
+                    container = QWidget()
+                    container_layout = QVBoxLayout(container)
+                    container_layout.setContentsMargins(0, 0, 0, 0)
+                    container_layout.setSpacing(8)
+                    container_layout.addWidget(group)
+                    preview = PicInlinePreviewLabel()
+                    preview.set_image(self._root_path, node.search_target)
+                    preview.image_requested.connect(self.image_preview_requested)
+                    self._widgets["pic_preview"] = preview
+                    container_layout.addWidget(preview)
+                    return container
+
+                self._add_grid_field(form, 2, 1, "辅助采集", self._action_button("框选 OCR 区域", "capture_ocr"))
+                return group
+
+            self._add_grid_field(form, 1, 0, "跳转目标来源", QLabel("请在通用属性中的“跳转标记”填写真实跳转目标"), span=2)
             return group
 
         if operation in {OperationType.PIC.value, OperationType.OCR.value}:
@@ -2065,5 +2177,12 @@ class NodeInspector(QWidget):
         param_widget = self._widgets.get("param_text")
         if isinstance(param_widget, QComboBox):
             node.param_text = param_widget.currentText()
+        elif isinstance(param_widget, QLineEdit):
+            node.param_text = param_widget.text()
+
+        resource_kind = self._widgets.get("resource_kind")
+        resource_alias = self._widgets.get("resource_alias")
+        if isinstance(resource_kind, QComboBox) and isinstance(resource_alias, QLineEdit):
+            node.param_text = f"{resource_kind.currentText().strip()};{resource_alias.text().strip()}"
 
         self.node_changed.emit(node)

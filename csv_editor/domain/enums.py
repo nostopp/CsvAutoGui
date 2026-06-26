@@ -15,6 +15,8 @@ class OperationType(StrEnum):
     WRITE = "write"
     PIC = "pic"
     OCR = "ocr"
+    SCRIPT = "script"
+    RESOURCE = "resource"
     NOTIFY = "notify"
     JUMP = "jmp"
 

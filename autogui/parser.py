@@ -55,6 +55,8 @@ def ParseParamData(param:str, operate:str, scaleHelper:ScaleHelper):
                     pass
 
             param_data = tuple(param_data)
+        case 'script' | 'resource':
+            param_data = tuple(part.strip() for part in param.split(";"))
         case 'mMove' | 'mMoveTo':
             data = param.split(";")
             xOffset=scaleHelper.getScaleInt(int(data[0])) 
