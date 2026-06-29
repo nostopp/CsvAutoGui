@@ -8,3 +8,5 @@ artifacts/
 build/
 dist/
 .build-release/
+.codex/skills/csvautogui-config-authoring/references/projects-local/*.md
+!.codex/skills/csvautogui-config-authoring/references/projects-local/_template.md
