@@ -3,8 +3,10 @@ import importlib.util
 import os
 import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pyautogui
 
@@ -16,9 +18,12 @@ from .scaleHelper import ScaleHelper
 
 
 _script_cache: dict[str, ModuleType] = {}
+OperationDict = dict[str, Any]
+JumpResolver = Callable[[int | str], int]
+SubflowStarter = Callable[[str], None]
 
 
-def clear_script_cache():
+def clear_script_cache() -> None:
     _script_cache.clear()
 
 
@@ -36,7 +41,7 @@ def _resolve_relative_path(config_dir: str, relative_path: str) -> Path:
     return resolved_path
 
 
-def _parse_script_target(operate_param) -> tuple[str, str | None, bool]:
+def _parse_script_target(operate_param: object) -> tuple[str, str | None, bool]:
     if isinstance(operate_param, str):
         parts = tuple(part.strip() for part in operate_param.split(";"))
     elif isinstance(operate_param, tuple):
@@ -86,14 +91,14 @@ class ScriptContext:
     def __init__(
         self,
         config_dir: str,
-        node: dict,
+        node: OperationDict,
         input_obj: BaseInput,
         scale_helper: ScaleHelper,
         resources: dict[str, ResourceSpec],
-        state: dict,
-        jump_resolver,
-        subflow_starter,
-    ):
+        state: dict[str, Any],
+        jump_resolver: JumpResolver,
+        subflow_starter: SubflowStarter,
+    ) -> None:
         self.config_dir = config_dir
         self.node = node
         self.input = input_obj
@@ -104,12 +109,10 @@ class ScriptContext:
         self._jump_resolver = jump_resolver
         self._subflow_starter = subflow_starter
         self._config_dir_path = Path(config_dir).resolve()
-        self._image_cache = {}
+        self._image_cache: dict[str, Any] = {}
 
-    def _report_observation(self, detail: str):
-        record_observation = getattr(self.input, "record_observation", None)
-        if callable(record_observation):
-            record_observation(detail, source="script_ctx")
+    def _report_observation(self, detail: str) -> None:
+        self.input.record_observation(detail, source="script_ctx")
 
     def resolve_path(self, path: str) -> Path:
         return _resolve_relative_path(self.config_dir, path)
@@ -128,7 +131,7 @@ class ScriptContext:
     def resolve_jump_target(self, target: int | str) -> int:
         return self._jump_resolver(target)
 
-    def start_subflow(self, file_name: str):
+    def start_subflow(self, file_name: str) -> None:
         relative_path = self.resolve_path(file_name).relative_to(self._config_dir_path).as_posix()
         self._subflow_starter(relative_path)
 
@@ -214,13 +217,13 @@ class ScriptContext:
             converted_region[0] : converted_region[0] + converted_region[2],
         ]
 
-    def sleep(self, seconds: float):
-        self._report_observation("sleep")
+    def sleep(self, seconds: float) -> None:
+        # self._report_observation("sleep")
         time.sleep(seconds)
 
 
 class ScriptBase:
-    def __init__(self, ctx: ScriptContext):
+    def __init__(self, ctx: ScriptContext) -> None:
         self.ctx = ctx
 
     def jump(self, target: int | str):
@@ -239,13 +242,13 @@ class ScriptBase:
 
 
 def execute_script_node(
-    operation: dict,
+    operation: OperationDict,
     config_dir: str,
     input_obj: BaseInput,
     scale_helper: ScaleHelper,
-    state: dict,
-    jump_resolver,
-    subflow_starter,
+    state: dict[str, Any],
+    jump_resolver: JumpResolver,
+    subflow_starter: SubflowStarter,
     print_log: bool = False,
 ):
     script_name, resource_name, explicit_resource = _parse_script_target(operation.get("operate_param"))

@@ -12,9 +12,24 @@
 
 - CSV 列名使用 `csv_schema.py` 中定义的中文列名。
 - `main.csv` 是默认入口流程。
+- `recovery.csv` 是可选的 config 级恢复流程。
 - 普通 `.csv` 文件可以作为子流程。
+- `runtime.json` 是可选的 config 级运行参数文件。
 - 运行时 `*_resource.csv` 是给脚本用的，不是普通流程控制文件。
 - CSV、脚本模块和运行时资源文件都有缓存，修改后需要手动重载。
+
+如果配置目录存在 `recovery.csv`：
+
+- 运行时会启用 config 级恢复机制
+- `recovery.csv` 正常结束后，整个 config 会从 `main.csv` 重新开始
+- 上一轮运行的共享 `state` 不会保留到重启后
+
+`runtime.json` 的字段回落规则是：
+
+- 主流程：`watchdog -> 默认值`
+- 恢复流程：`recovery_watchdog -> watchdog -> 默认值`
+
+`recovery_limit` 只属于 `watchdog`，且小于 0 表示不限制恢复次数。
 
 ## 编写时需要关注的节点语义
 
@@ -23,6 +38,13 @@
 - `jmp` 可以接受序号或跳转标记。
 - `script` 适合纯 CSV 控制流已经太脆弱或太重复的情况。
 - `resource` 节点不能出现在普通流程文件中。
+
+在启用恢复机制的配置里：
+
+- 鼠标点击、按键、输入等真实外部输入会被视为有效操作
+- 观察、判断、跳转和提示不会被视为有效操作
+- 脚本里的 `ctx.input` 会参与有效操作统计
+- 脚本里的 `ctx.find_*` 会参与观察统计
 
 ## 编写阶段资源清单
 

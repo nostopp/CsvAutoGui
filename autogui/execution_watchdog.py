@@ -1,8 +1,14 @@
 import time
+from collections.abc import Callable
 
 
 class ExecutionWatchdog:
-    def __init__(self, stall_timeout_seconds: float, stall_non_progress_ops: int, time_fn=None):
+    def __init__(
+        self,
+        stall_timeout_seconds: float,
+        stall_non_progress_ops: int,
+        time_fn: Callable[[], float] | None = None,
+    ) -> None:
         self.stall_timeout_seconds = float(stall_timeout_seconds)
         self.stall_non_progress_ops = int(stall_non_progress_ops)
         self._time_fn = time_fn or time.monotonic
@@ -11,16 +17,16 @@ class ExecutionWatchdog:
         self.non_progress_count_since_progress = 0
         self.current_step_had_progress = False
 
-    def begin_step(self):
+    def begin_step(self) -> None:
         self.current_step_had_progress = False
 
-    def record_progress(self, detail: str, source: str = "input"):
+    def record_progress(self, detail: str, source: str = "input") -> None:
         now = self._time_fn()
         self.last_progress_at = now
         self.non_progress_count_since_progress = 0
         self.current_step_had_progress = True
 
-    def record_observation(self, detail: str, source: str = "node"):
+    def record_observation(self, detail: str, source: str = "node") -> None:
         self.non_progress_count_since_progress += 1
 
     def should_recover(self, now: float | None = None) -> bool:

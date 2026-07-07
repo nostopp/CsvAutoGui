@@ -4,16 +4,20 @@ import ctypes
 from dataclasses import dataclass
 from pathlib import Path
 import re
+from threading import Event
+from typing import Any
 
 import pyautogui
 import win32con
 
 from . import log
 from .autoOperator import AutoOperator
+from .baseInput import BaseInput
 from .execution_watchdog import ExecutionWatchdog
 from .observed_input import ObservedInput
 from .parser import GetCsv
 from .runtime_config import RuntimeConfigResolver, WatchdogSettings, WatchdogThresholds
+from .scaleHelper import ScaleHelper
 
 
 NON_PROGRESS_OPERATIONS = {"mMove", "mMoveTo", "pic", "ocr", "jmp", "notify", "script"}
@@ -35,7 +39,16 @@ class SessionRunResult:
 
 
 class FlowRuntimeSession:
-    def __init__(self, config_dir: str, source_file: str, input_obj, scale_helper, loop: bool, print_log: bool, shared_state: dict | None = None):
+    def __init__(
+        self,
+        config_dir: str,
+        source_file: str,
+        input_obj: BaseInput,
+        scale_helper: ScaleHelper,
+        loop: bool,
+        print_log: bool,
+        shared_state: dict[str, Any] | None = None,
+    ) -> None:
         shared_state = {} if shared_state is None else shared_state
         self.sub_operator_list: list[AutoOperator] = []
         self.main_operator = AutoOperator(
@@ -83,7 +96,11 @@ class FlowRuntimeSession:
         return True
 
 
-def _run_session_until_boundary(session: FlowRuntimeSession, watchdog: ExecutionWatchdog, stop_event) -> SessionRunResult:
+def _run_session_until_boundary(
+    session: FlowRuntimeSession,
+    watchdog: ExecutionWatchdog,
+    stop_event: Event,
+) -> SessionRunResult:
     while not stop_event.is_set():
         step = session.peek_current_step()
         if step is None:
@@ -129,7 +146,15 @@ def capture_recovery_screenshot(config_dir: str, step: StepInfo | None) -> Path 
         return None
 
 
-def create_main_session(config_dir: str, real_input, scale_helper, loop: bool, print_log: bool, watchdog_settings: WatchdogSettings, recovery_count: int) -> tuple[FlowRuntimeSession, ExecutionWatchdog]:
+def create_main_session(
+    config_dir: str,
+    real_input: BaseInput,
+    scale_helper: ScaleHelper,
+    loop: bool,
+    print_log: bool,
+    watchdog_settings: WatchdogSettings,
+    recovery_count: int,
+) -> tuple[FlowRuntimeSession, ExecutionWatchdog]:
     watchdog = ExecutionWatchdog(
         watchdog_settings.stall_timeout_seconds,
         watchdog_settings.stall_non_progress_ops,
@@ -146,7 +171,15 @@ def create_main_session(config_dir: str, real_input, scale_helper, loop: bool, p
     return session, watchdog
 
 
-def run_recovery_flow(config_dir: str, real_input, scale_helper, print_log: bool, runtime_resolver: RuntimeConfigResolver, stop_event, recovery_count: int) -> tuple[bool, str]:
+def run_recovery_flow(
+    config_dir: str,
+    real_input: BaseInput,
+    scale_helper: ScaleHelper,
+    print_log: bool,
+    runtime_resolver: RuntimeConfigResolver,
+    stop_event: Event,
+    recovery_count: int,
+) -> tuple[bool, str]:
     thresholds: WatchdogThresholds = runtime_resolver.get_recovery_watchdog_thresholds()
     watchdog = ExecutionWatchdog(
         thresholds.stall_timeout_seconds,
@@ -174,7 +207,14 @@ def run_recovery_flow(config_dir: str, real_input, scale_helper, print_log: bool
     return False, "recovery.csv 被停止"
 
 
-def run_config_with_recovery(config_dir: str, real_input, scale_helper, loop: bool, print_log: bool, stop_event):
+def run_config_with_recovery(
+    config_dir: str,
+    real_input: BaseInput,
+    scale_helper: ScaleHelper,
+    loop: bool,
+    print_log: bool,
+    stop_event: Event,
+) -> None:
     resolver = RuntimeConfigResolver(config_dir)
     watchdog_settings = resolver.get_watchdog_settings()
     recovery_count = 0
