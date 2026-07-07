@@ -1,0 +1,11 @@
+{
+  "watchdog": {
+    "stall_timeout_seconds": 10,
+    "stall_non_progress_ops": 3,
+    "recovery_limit": 2
+  },
+  "recovery_watchdog": {
+    "stall_timeout_seconds": 30,
+    "stall_non_progress_ops": 20
+  }
+}

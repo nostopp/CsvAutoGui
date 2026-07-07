@@ -161,23 +161,24 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
             else:
                 input_obj = autogui.BackGroundInput(TITLE, MULTI_WINDOW, PRINT_LOG, CLICK_MOVE_CURSOR)
 
-            subOperatorList: list[autogui.AutoOperator] = []
-            mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH, scale_helper), CONFIG_PATH, subOperatorList, input_obj, scale_helper, LOOP, PRINT_LOG)
+            if autogui.has_recovery_flow(CONFIG_PATH):
+                autogui.run_config_with_recovery(CONFIG_PATH, input_obj, scale_helper, LOOP, PRINT_LOG, local_stop)
+            else:
+                subOperatorList: list[autogui.AutoOperator] = []
+                mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH, scale_helper), CONFIG_PATH, subOperatorList, input_obj, scale_helper, LOOP, PRINT_LOG)
 
-            main_finished = False
-            subOperator = None
-            while not local_stop.is_set():
-                if len(subOperatorList) > 0:
-                    idx = len(subOperatorList) - 1
-                    subOperator = subOperatorList[idx]
-                    if not subOperator.Update():
-                        subOperatorList.pop(idx)
+                main_finished = False
+                while not local_stop.is_set():
+                    if len(subOperatorList) > 0:
+                        idx = len(subOperatorList) - 1
+                        if not subOperatorList[idx].Update():
+                            subOperatorList.pop(idx)
 
-                else:
-                    if main_finished:
-                        break
-                    if not mainOperator.Update():
-                        main_finished = True
+                    else:
+                        if main_finished:
+                            break
+                        if not mainOperator.Update():
+                            main_finished = True
 
     except Exception as e:
         log.error(f"运行时抛出异常: {e}")

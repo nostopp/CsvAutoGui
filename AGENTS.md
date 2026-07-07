@@ -22,16 +22,21 @@
 
 1. `main.py` 解析参数并初始化 `ScaleHelper`、OCR 预加载、输入模式。
 2. `autogui.parser.GetCsv()` 读取并缓存 CSV，返回 `index -> operation dict`。
-3. `autogui.autoOperator.AutoOperator` 按序号解释执行节点。
-4. 普通 `pic/ocr` 节点可直接定位，也可走分支跳转或启动子流程。
-5. `script` 节点通过 `autogui.script_runtime.execute_script_node()` 加载配置目录内的 Python 脚本执行。
+3. 若配置目录存在 `recovery.csv`，`main.py` 会额外创建 watchdog / recovery 运行时；否则保持旧的直接执行模式。
+4. `autogui.autoOperator.AutoOperator` 按序号解释执行节点。
+5. 普通 `pic/ocr` 节点可直接定位，也可走分支跳转或启动子流程。
+6. `script` 节点通过 `autogui.script_runtime.execute_script_node()` 加载配置目录内的 Python 脚本执行。
+7. 启用了 recovery 的 config 在判定卡死后，会执行同目录下的 `recovery.csv`；恢复成功后清空共享业务 `state` 并从 `main.csv` 重启整个 config。
+8. 每次真正启动 `recovery.csv` 前，运行时都会额外抓取一张完整虚拟桌面的全屏截图，输出到 `screenshot/recovery_{config_name}_{flow}_{index}_{timestamp}.png`，与前后台模式和目标窗口配置无关。
 
 ## CSV 约定
 
 - 列定义统一在 `csv_schema.py`。
 - 运行时真正依赖的是中文列名，不是编辑器内部字段名。
 - `main.csv` 是默认入口；其他普通 `.csv` 可被当作子流程启动。
+- `recovery.csv` 是可选的 config 级统一恢复流程；只有它存在时才启用 watchdog / recovery。
 - `*_resource.csv` 不是流程文件，只给 `script` 节点提供资源。
+- `runtime.json` 是可选的 config 级运行参数文件，用来配置 watchdog / recovery 阈值。
 - 解析缓存键是 `config_path/file_name`，因此修改 CSV 后 **不会自动生效**，必须手动重载。
 
 ## 支持的关键节点
@@ -48,6 +53,8 @@
 - `pic` / `ocr` 没有分支参数时，会持续重试直到命中，然后将鼠标移动到目标中心。
 - `pic` 的彩色匹配不是走默认灰度模板匹配，而是 `imageMatcher.py` 中的 `cv2.TM_SQDIFF_NORMED` 分支。
 - `write` 实际实现是 `pyperclip.copy(...)` 后发送 `Ctrl+V`，不是逐字输入。
+- 启用了 recovery 的 config 会按“无进展窗口”判定卡死：自上一次有效操作以来，如果持续只有观察/跳转类动作，并同时超过时间阈值与非有效操作次数阈值，就会触发 `recovery.csv`。
+- `notify`、`mMove`、`mMoveTo` 不算有效操作；脚本中的 `ctx.find_image`、`ctx.find_text`、`ctx.sleep` 也只算观察，不会刷新 watchdog。
 
 ## `pic` / `ocr` 分支语义
 
@@ -85,6 +92,21 @@
 - `ctx.state`
 
 `ctx.state` 是实例级共享字典，主流程、子流程、脚本之间共用。
+如果 recovery 成功并整 config 重启，这个共享字典会被清空后重建。
+
+## `runtime.json` / watchdog 约定
+
+- `runtime.json` 位置：`config/<name>/runtime.json`
+- 字段：
+  - `watchdog.stall_timeout_seconds`
+  - `watchdog.stall_non_progress_ops`
+  - `watchdog.recovery_limit`
+  - `recovery_watchdog.stall_timeout_seconds`
+  - `recovery_watchdog.stall_non_progress_ops`
+- 字段回落：
+  - 主流程：`watchdog -> 框架默认值`
+  - recovery 流程：`recovery_watchdog -> watchdog -> 框架默认值`
+- `recovery_limit < 0` 表示无限次恢复。
 
 ## 输入模式
 
@@ -136,6 +158,8 @@
 因此以下改动都需要手动重载后才会按新内容执行：
 
 - CSV
+- `recovery.csv`
+- `runtime.json`
 - `script` Python 文件
 - `*_resource.csv`
 
@@ -155,6 +179,13 @@
   - `csv_editor/services/validation.py`
 - 如果改了 `script` / `resource` 规则，要同时检查运行时和编辑器校验是否一致。
 - 如果改了图片/OCR定位行为，要同时看前台输入和后台输入两套实现。
+- 如果改了 watchdog / recovery 行为，重点检查：
+  - `main.py`
+  - `autogui/recovery_runtime.py`
+  - `autogui/execution_watchdog.py`
+  - `autogui/observed_input.py`
+  - `autogui/script_runtime.py`
+  - `README.md` / `AGENTS.md`
 
 ## 推荐阅读顺序
 

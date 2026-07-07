@@ -106,6 +106,11 @@ class ScriptContext:
         self._config_dir_path = Path(config_dir).resolve()
         self._image_cache = {}
 
+    def _report_observation(self, detail: str):
+        record_observation = getattr(self.input, "record_observation", None)
+        if callable(record_observation):
+            record_observation(detail, source="script_ctx")
+
     def resolve_path(self, path: str) -> Path:
         return _resolve_relative_path(self.config_dir, path)
 
@@ -135,6 +140,7 @@ class ScriptContext:
         return self._image_cache[cache_key]
 
     def find_image(self, resource: str | None = None, name: str | None = None, region=None, confidence: float | None = None, grayscale=None):
+        self._report_observation("find_image")
         resource_spec = self.get_resource(resource) if resource is not None else None
         if resource_spec is not None and resource_spec.kind != "pic":
             raise ValueError(f"资源 {resource} 不是 pic 类型")
@@ -172,6 +178,7 @@ class ScriptContext:
         )
 
     def find_text(self, resource: str | None = None, text: str | None = None, region=None, confidence: float | None = None):
+        self._report_observation("find_text")
         resource_spec = self.get_resource(resource) if resource is not None else None
         if resource_spec is not None and resource_spec.kind != "ocr":
             raise ValueError(f"资源 {resource} 不是 ocr 类型")
@@ -208,6 +215,7 @@ class ScriptContext:
         ]
 
     def sleep(self, seconds: float):
+        self._report_observation("sleep")
         time.sleep(seconds)
 
 

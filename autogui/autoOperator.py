@@ -18,7 +18,7 @@ from .script_runtime import execute_script_node
 CONFIDENCE_PATTERN = re.compile(r'confidence\s*=\s*([\d.-]+)')
 
 class AutoOperator:
-    def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, input:BaseInput, scaleHelper : ScaleHelper,  loop : bool = False, printLog : bool = False, sharedState:dict|None = None):
+    def __init__(self, operateDict : dict, configPath : str, subOperatorList:list, input:BaseInput, scaleHelper : ScaleHelper,  loop : bool = False, printLog : bool = False, sharedState:dict|None = None, sourceFile:str = "main.csv"):
         self._operateDict = operateDict
         self._operateIndex = 1
         self._configPath = configPath
@@ -28,10 +28,18 @@ class AutoOperator:
         self._loop = loop
         self._printLog = printLog
         self._sharedState = {} if sharedState is None else sharedState
+        self._sourceFile = sourceFile
         self._jumpMarks = dict()
         for index, operation in operateDict.items():
             if 'jump_mark' in operation:
                 self._jumpMarks[operation['jump_mark']] = index
+
+    @property
+    def source_file(self) -> str:
+        return self._sourceFile
+
+    def peek_current_operation(self) -> dict:
+        return self._operateDict[self._operateIndex]
 
     def _start_sub_operator(self, file_name: str):
         if file_name.lower().endswith('_resource.csv'):
@@ -48,6 +56,7 @@ class AutoOperator:
                 False,
                 self._printLog,
                 self._sharedState,
+                file_name,
             )
         )
 

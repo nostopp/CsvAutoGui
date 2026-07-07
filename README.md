@@ -26,6 +26,55 @@
    ```
 5. 修改 CSV、`script` 脚本或 `*_resource.csv` 后，需要手动执行界面里的“重新加载”来刷新配置缓存。
 
+### 可选的全局恢复机制
+
+- 当配置目录下存在 `recovery.csv` 时，运行时会自动启用 watchdog / recovery 系统。
+- 当配置目录下不存在 `recovery.csv` 时，运行时保持旧行为，不做卡死检测，也不会自动恢复。
+- 恢复语义为：
+  - 主流程长时间没有产生“有效操作”时，运行时执行 `recovery.csv`
+  - 每次真正开始执行 `recovery.csv` 前，运行时会先抓取一次完整虚拟桌面的全屏截图，保存到 `screenshot/recovery_{config_name}_{flow}_{index}_{timestamp}.png`
+  - `recovery.csv` 正常执行到结尾，就视为恢复成功
+  - 恢复成功后会清空本轮运行的共享 `state`，并从 `main.csv` 第一步重新开始
+  - `recovery.csv` 自己如果抛异常或再次卡死，当前实例直接终止
+
+### `runtime.json`
+
+- recovery/watchdog 的 config 级参数放在配置目录下的 `runtime.json`。
+- `runtime.json` 是可选文件；缺失时全部回落到框架默认值。
+- 当前支持的字段：
+
+```json
+{
+  "watchdog": {
+    "stall_timeout_seconds": 60,
+    "stall_non_progress_ops": 60,
+    "recovery_limit": 3
+  },
+  "recovery_watchdog": {
+    "stall_timeout_seconds": 30,
+    "stall_non_progress_ops": 20
+  }
+}
+```
+
+- 字段回落规则：
+  - 主流程：`watchdog.{field} -> 框架默认值`
+  - recovery 流程：`recovery_watchdog.{field} -> watchdog.{field} -> 框架默认值`
+- `recovery_limit` 只属于主流程 `watchdog`。
+- `recovery_limit < 0` 表示 recovery 次数无限制。
+
+### 什么算“卡死”
+
+- 只有同时满足下面两项，才会触发 recovery：
+  - 距离上一次有效操作超过 `stall_timeout_seconds`
+  - 自上一次有效操作以来，累计的非有效操作次数达到 `stall_non_progress_ops`
+- 有效操作：
+  - `click` `mDown` `mUp` `press` `kDown` `kUp` `write`
+  - `script` 中通过 `ctx.input.click/press/keyDown/keyUp/hotkey/...` 发出的真实输入
+- 非有效操作：
+  - `mMove` `mMoveTo` `pic` `ocr` `jmp` `notify`
+  - `script` 中的 `ctx.find_image(...)`、`ctx.find_text(...)`、`ctx.sleep(...)`
+
 ### 运行参数
 
 | 参数 | 说明 | 默认值 |
@@ -119,6 +168,7 @@
 - 编辑器中打开 `*_resource.csv` 时，只能新增 `resource` 节点；`resource(pic;alias)` 和 `resource(ocr;alias)` 仍然可以继续使用截图回填和 OCR 区域采集能力。
 - 当前版本不会自动检测脚本或资源文件变更。修改 `.py`、`*.csv`、`*_resource.csv` 后，都需要手动点击“重新加载”。
 - 这次手动重载的含义是“重载配置”：会一起刷新 CSV 解析缓存、脚本缓存和资源文件缓存。
+- 当配置启用了 `recovery.csv` 时，脚本里的 `ctx.input` 会自动计入 watchdog 的“有效操作”；`ctx.find_image`、`ctx.find_text`、`ctx.sleep` 会计入“非有效操作”。
 
 ### Script 编写建议
 
@@ -210,6 +260,7 @@ def run(ctx):
 - `pic` 与 `ocr` 在使用 `exist` 或 `notExist` 后有两种配置     
    - 配置你要执行的 file.csv, 满足条件将会开启新的csv文件并执行，在执行完毕后会回到该csv并执行下一行，若不满足条件会继续执行下一行   
    - 配置 int;int,若满足条件则跳转到第一个int配置的序号步骤，不满足则跳转到第二个int配置的步骤序号
+- `recovery.csv` 不是新的节点类型，而是一份普通 flow 文件；里面同样可以使用 `pic`、`ocr`、`jmp`、子流程和 `script`。
 
 ---
 ## 关于OCR版本

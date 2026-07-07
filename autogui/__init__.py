@@ -15,3 +15,4 @@ from .backGroundInput import BackGroundInput
 from .recordMode import RecordMode
 from .script_runtime import ScriptBase, ScriptContext, clear_script_cache
 from .resource_loader import clear_resource_cache
+from .recovery_runtime import has_recovery_flow, run_config_with_recovery
