@@ -14,22 +14,40 @@
 - `main.csv` 是默认入口流程。
 - `recovery.csv` 是可选的 config 级恢复流程。
 - 普通 `.csv` 文件可以作为子流程。
-- `runtime.json` 是可选的 config 级运行参数文件。
+- `runtime.json` 是可选的 config 级运行参数文件，用于配置 `watchdog`、stall 未解决通知和 `notify` 节点通知通道。
 - 运行时 `*_resource.csv` 是给脚本用的，不是普通流程控制文件。
 - CSV、脚本模块和运行时资源文件都有缓存，修改后需要手动重载。
 
-如果配置目录存在 `recovery.csv`：
+`watchdog` 是否启用由 `runtime.json.watchdog.mode` 决定：
 
-- 运行时会启用 config 级恢复机制
+- `off`：关闭
+- `on`：启用
+- `auto`：当前 config 有 `recovery.csv`，或 `on_stall_unresolved.remote_notify=true` 时启用
+
+如果启用了 `watchdog` 且当前 config 存在 `recovery.csv`：
+
+- 主流程 stall 后会执行 `recovery.csv`
 - `recovery.csv` 正常结束后，整个 config 会从 `main.csv` 重新开始
-- 上一轮运行的共享 `state` 不会保留到重启后
+- 重启前会清空共享 `state`
+
+如果 stall 后无法自动闭环：
+
+- 运行时会进入 `on_stall_unresolved`
+- 可按配置做本地通知或远程通知
+- 当前实例随后终止
 
 `runtime.json` 的字段回落规则是：
 
 - 主流程：`watchdog -> 默认值`
-- 恢复流程：`recovery_watchdog -> watchdog -> 默认值`
+- 恢复流程：`watchdog.recovery_watchdog -> watchdog -> 默认值`
 
 `recovery_limit` 只属于 `watchdog`，且小于 0 表示不限制恢复次数。
+
+通知相关约定：
+
+- `notification.notify_operation` 控制普通 `notify` 节点的默认通知通道
+- `notification.remote` 控制远程通知能力
+- 远程 sendkey 可直接写 `sendkey`，也可改用 `sendkey_env`
 
 ## 编写时需要关注的节点语义
 
@@ -38,8 +56,9 @@
 - `jmp` 可以接受序号或跳转标记。
 - `script` 适合纯 CSV 控制流已经太脆弱或太重复的情况。
 - `resource` 节点不能出现在普通流程文件中。
+- `notify` 是否只做本地通知，还是同时远程推送，由 `runtime.json` 决定。
 
-在启用恢复机制的配置里：
+在启用 `watchdog` 的配置里：
 
 - 鼠标点击、按键、输入等真实外部输入会被视为有效操作
 - 观察、判断、跳转和提示不会被视为有效操作

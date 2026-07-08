@@ -23,6 +23,9 @@
 - script 路径没有越出配置目录
 - 运行时 `*_resource.csv` 只在脚本真的需要时创建
 - 如果存在 `runtime.json`，字段名和层级必须符合当前运行时约定
+- `watchdog.mode` 只能是 `off`、`auto`、`on`
+- recovery 阈值统一放在 `watchdog.recovery_watchdog`
+- `on_stall_unresolved` 与 `notification` 只在确实需要时生成，且字段名正确
 - `recovery_limit` 只能出现在 `watchdog` 下
 - 资源命名可理解且带有阶段语义
 - 分支逻辑和已确认流程方案一致
