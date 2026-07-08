@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from autogui.config_paths import normalize_config_dir
 from csv_editor.adapters import RuntimeOcrPreviewAdapter
 from csv_editor.domain.enums import BranchMode, BranchTrigger, OperationType, ValidationSeverity
 from csv_editor.domain.models import BranchConfig, EditorDocument, FlowDocument, OperationNode, ValidationIssue
@@ -331,6 +332,7 @@ class EditorMainWindow(QMainWindow):
             self.open_config_folder(Path(directory))
 
     def open_config_folder(self, root_path: Path) -> None:
+        root_path = normalize_config_dir(root_path)
         if not root_path.exists():
             QMessageBox.warning(self, "路径不存在", f"未找到目录: {root_path}")
             return
@@ -1138,6 +1140,7 @@ class ExternalNodeImportDialog(QDialog):
         if not directory:
             return
         root_path = Path(directory)
+        root_path = normalize_config_dir(root_path)
         try:
             self.document = self.codec.load_document(root_path)
         except OSError as exc:

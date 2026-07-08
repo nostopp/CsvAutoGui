@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .config_paths import logical_abs_path
 from .parser import GetCsv
 from .scaleHelper import ScaleHelper
 
@@ -29,10 +30,14 @@ def _resolve_resource_path(config_path: str, file_name: str) -> Path:
     if path.is_absolute():
         raise ValueError(f"资源文件只支持相对配置目录路径: {file_name}")
 
-    base_dir = Path(config_path).resolve()
-    resolved_path = (base_dir / path).resolve()
+    base_dir = logical_abs_path(config_path)
+    resolved_path = logical_abs_path(path, base_dir)
     try:
         resolved_path.relative_to(base_dir)
+    except ValueError as exc:
+        raise ValueError(f"资源文件路径超出配置目录: {file_name}") from exc
+    try:
+        resolved_path.resolve().relative_to(base_dir.resolve())
     except ValueError as exc:
         raise ValueError(f"资源文件路径超出配置目录: {file_name}") from exc
     return resolved_path
@@ -57,7 +62,7 @@ def load_resource_file(
             raise FileNotFoundError(f"未找到资源文件: {resource_path}")
         return {}
 
-    cache_key = os.fspath(resource_path.resolve())
+    cache_key = os.fspath(resource_path)
     if cache_key in _resource_cache:
         return _resource_cache[cache_key]
 

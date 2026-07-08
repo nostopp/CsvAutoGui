@@ -12,6 +12,7 @@ import pyautogui
 
 from . import log
 from .baseInput import BaseInput
+from .config_paths import logical_abs_path
 from .ocr import OCR
 from .resource_loader import ResourceSpec, load_resource_file
 from .scaleHelper import ScaleHelper
@@ -32,10 +33,14 @@ def _resolve_relative_path(config_dir: str, relative_path: str) -> Path:
     if path.is_absolute():
         raise ValueError(f"只支持相对配置目录的路径: {relative_path}")
 
-    base_dir = Path(config_dir).resolve()
-    resolved_path = (base_dir / path).resolve()
+    base_dir = logical_abs_path(config_dir)
+    resolved_path = logical_abs_path(path, base_dir)
     try:
         resolved_path.relative_to(base_dir)
+    except ValueError as exc:
+        raise ValueError(f"路径超出配置目录: {relative_path}") from exc
+    try:
+        resolved_path.resolve().relative_to(base_dir.resolve())
     except ValueError as exc:
         raise ValueError(f"路径超出配置目录: {relative_path}") from exc
     return resolved_path
@@ -108,7 +113,7 @@ class ScriptContext:
         self.resources = resources
         self._jump_resolver = jump_resolver
         self._subflow_starter = subflow_starter
-        self._config_dir_path = Path(config_dir).resolve()
+        self._config_dir_path = logical_abs_path(config_dir)
         self._image_cache: dict[str, Any] = {}
 
     def _report_observation(self, detail: str) -> None:

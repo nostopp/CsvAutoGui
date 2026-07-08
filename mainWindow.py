@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 import keyboard
 
 import autogui.ocr
+from autogui.config_paths import display_config_path
 import main as main_module
 
 
@@ -806,18 +807,10 @@ class MainWindow:
         if not raw:
             return ""
 
-        path = Path(raw)
         try:
-            if not path.is_absolute():
-                return path.as_posix()
-            return Path(path.resolve().relative_to(Path.cwd().resolve())).as_posix()
-        except ValueError:
-            try:
-                return Path(path.resolve()).as_posix()
-            except OSError:
-                return path.as_posix()
+            return display_config_path(raw)
         except OSError:
-            return path.as_posix()
+            return Path(raw).as_posix()
 
     def _normalize_log_message(self, msg: str) -> str:
         normalized = msg

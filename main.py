@@ -8,6 +8,7 @@ import psutil
 import keyboard
 import mouse
 import autogui
+from autogui.config_paths import normalize_config_dir
 from autogui import log
 
 
@@ -87,7 +88,7 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
     - stop_event: threading.Event，用来停止运行；如果 None，会创建一个本地事件并在 hotkey 时设置
     - use_hotkey: 是否注册 Shift+Ctrl+X 退出（仅用于命令行启动）
     """
-    config_name = os.fspath(Path(args.config))
+    config_name = os.fspath(normalize_config_dir(Path(args.config)))
 
     try:
         # 将当前实例名（config 路径）放入线程上下文，方便日志带上来源

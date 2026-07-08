@@ -3,6 +3,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .config_paths import normalize_config_dir, normalize_config_root
+
 
 DEFAULT_STALL_TIMEOUT_SECONDS = 90.0
 DEFAULT_STALL_NON_PROGRESS_OPS = 60
@@ -43,8 +45,8 @@ class NotificationSettings:
 
 class RuntimeConfigResolver:
     def __init__(self, config_dir: str, config_root: str | Path | None = None):
-        self._config_dir = Path(config_dir).resolve()
-        configured_root = self._resolve_config_root(config_root)
+        configured_root = normalize_config_root(config_root)
+        self._config_dir = normalize_config_dir(config_dir, configured_root)
         if self._config_dir.is_relative_to(configured_root):
             self._config_root = configured_root
         else:
@@ -73,9 +75,7 @@ class RuntimeConfigResolver:
 
     @staticmethod
     def _resolve_config_root(config_root: str | Path | None) -> Path:
-        if config_root is None:
-            return Path("config").resolve()
-        return Path(config_root).resolve()
+        return normalize_config_root(config_root)
 
     def _get_runtime_json_paths(self) -> list[Path]:
         runtime_paths: list[Path] = []
