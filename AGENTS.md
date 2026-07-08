@@ -36,7 +36,8 @@
 - `main.csv` 是默认入口；其他普通 `.csv` 可被当作子流程启动。
 - `recovery.csv` 是可选的 config 级统一恢复流程；只有它存在时才启用 watchdog / recovery。
 - `*_resource.csv` 不是流程文件，只给 `script` 节点提供资源。
-- `runtime.json` 是可选的 config 级运行参数文件，用来配置 watchdog / recovery 阈值。
+- `runtime.json` 是可选的层级运行参数文件，用来配置 watchdog / recovery 阈值以及后续其他运行时配置。
+- `runtime.json` 默认从 `config/` 根目录开始，沿当前 config 路径逐级合并；它的加载与 `recovery.csv` 是否存在无关。
 - 解析缓存键是 `config_path/file_name`，因此修改 CSV 后 **不会自动生效**，必须手动重载。
 
 ## 支持的关键节点
@@ -96,16 +97,21 @@
 
 ## `runtime.json` / watchdog 约定
 
-- `runtime.json` 位置：`config/<name>/runtime.json`
+- `runtime.json` 搜索范围：默认从仓库 `config/runtime.json` 一直到当前 config 目录下的 `runtime.json`
 - 字段：
   - `watchdog.stall_timeout_seconds`
   - `watchdog.stall_non_progress_ops`
   - `watchdog.recovery_limit`
   - `recovery_watchdog.stall_timeout_seconds`
   - `recovery_watchdog.stall_non_progress_ops`
+- 层级合并：
+  - 父目录先加载，子目录后覆盖
+  - 对象字段递归合并
+  - 标量、数组、`null` 按子目录整值覆盖
 - 字段回落：
   - 主流程：`watchdog -> 框架默认值`
   - recovery 流程：`recovery_watchdog -> watchdog -> 框架默认值`
+- `runtime.json` 是否存在不会影响 recovery 机制是否启动；recovery 启动仍然只由当前 config 目录中的 `recovery.csv` 决定。
 - `recovery_limit < 0` 表示无限次恢复。
 
 ## 输入模式

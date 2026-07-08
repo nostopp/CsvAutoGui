@@ -22,8 +22,13 @@ class WatchdogThresholds:
 
 
 class RuntimeConfigResolver:
-    def __init__(self, config_dir: str):
-        self._config_dir = Path(config_dir)
+    def __init__(self, config_dir: str, config_root: str | Path | None = None):
+        self._config_dir = Path(config_dir).resolve()
+        configured_root = self._resolve_config_root(config_root)
+        if self._config_dir.is_relative_to(configured_root):
+            self._config_root = configured_root
+        else:
+            self._config_root = self._config_dir
         self._data = self._load_runtime_json()
 
     @property
@@ -38,23 +43,64 @@ class RuntimeConfigResolver:
     def runtime_json_path(self) -> Path:
         return self._config_dir / "runtime.json"
 
+    @property
+    def runtime_json_paths(self) -> list[Path]:
+        return self._get_runtime_json_paths()
+
+    @property
+    def config_root(self) -> Path:
+        return self._config_root
+
+    @staticmethod
+    def _resolve_config_root(config_root: str | Path | None) -> Path:
+        if config_root is None:
+            return Path("config").resolve()
+        return Path(config_root).resolve()
+
+    def _get_runtime_json_paths(self) -> list[Path]:
+        runtime_paths: list[Path] = []
+        current = self._config_dir
+        while True:
+            runtime_path = current / "runtime.json"
+            if runtime_path.exists():
+                runtime_paths.append(runtime_path)
+
+            if current == self._config_root:
+                break
+
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+
+        runtime_paths.reverse()
+        return runtime_paths
+
     def _load_runtime_json(self) -> dict:
-        if not self.recovery_enabled:
-            return {}
+        merged: dict = {}
+        for runtime_path in self.runtime_json_paths:
+            with runtime_path.open("r", encoding="utf-8") as fp:
+                data = json.load(fp)
 
-        runtime_path = self.runtime_json_path
-        if not runtime_path.exists():
-            return {}
+            if data is None:
+                continue
+            if not isinstance(data, dict):
+                raise ValueError(f"runtime.json 必须是对象: {runtime_path}")
 
-        with runtime_path.open("r", encoding="utf-8") as fp:
-            data = json.load(fp)
+            merged = self._merge_dicts(merged, data)
 
-        if data is None:
-            return {}
-        if not isinstance(data, dict):
-            raise ValueError(f"runtime.json 必须是对象: {runtime_path}")
+        return merged
 
-        return data
+    @classmethod
+    def _merge_dicts(cls, base: dict, override: dict) -> dict:
+        merged = dict(base)
+        for key, value in override.items():
+            base_value = merged.get(key)
+            if isinstance(base_value, dict) and isinstance(value, dict):
+                merged[key] = cls._merge_dicts(base_value, value)
+            else:
+                merged[key] = value
+        return merged
 
     def _get_section(self, name: str) -> dict:
         section = self._data.get(name, {})

@@ -39,8 +39,8 @@
 
 ### `runtime.json`
 
-- recovery/watchdog 的 config 级参数放在配置目录下的 `runtime.json`。
-- `runtime.json` 是可选文件；缺失时全部回落到框架默认值。
+- `runtime.json` 是可选的运行时配置文件，默认从仓库 `config/` 根目录开始，沿着 `config/.../当前配置目录` 逐级向下合并。
+- 子目录只需要覆盖自己关心的字段；未覆盖字段会继续继承父目录，再回落到框架默认值。
 - 当前支持的字段：
 
 ```json
@@ -60,6 +60,11 @@
 - 字段回落规则：
   - 主流程：`watchdog.{field} -> 框架默认值`
   - recovery 流程：`recovery_watchdog.{field} -> watchdog.{field} -> 框架默认值`
+- 层级合并规则：
+  - 搜索范围：从 `config/runtime.json` 一直到当前 config 目录下的 `runtime.json`
+  - 合并顺序：父目录先加载，子目录后覆盖
+  - 对象字段：递归合并
+  - 标量、数组、`null`：子目录整值覆盖父目录
 - `recovery_limit` 只属于主流程 `watchdog`。
 - `recovery_limit < 0` 表示 recovery 次数无限制。
 
