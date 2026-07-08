@@ -161,8 +161,19 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
             else:
                 input_obj = autogui.BackGroundInput(TITLE, MULTI_WINDOW, PRINT_LOG, CLICK_MOVE_CURSOR)
 
-            if autogui.has_recovery_flow(CONFIG_PATH):
-                autogui.run_config_with_recovery(CONFIG_PATH, input_obj, scale_helper, LOOP, PRINT_LOG, local_stop)
+            runtime_resolver = autogui.RuntimeConfigResolver(CONFIG_PATH)
+            autogui.configure_thread_notifications(runtime_resolver.get_notification_settings())
+
+            if runtime_resolver.should_enable_watchdog():
+                autogui.run_config_with_watchdog(
+                    CONFIG_PATH,
+                    input_obj,
+                    scale_helper,
+                    LOOP,
+                    PRINT_LOG,
+                    local_stop,
+                    runtime_resolver=runtime_resolver,
+                )
             else:
                 subOperatorList: list[autogui.AutoOperator] = []
                 mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH, scale_helper), CONFIG_PATH, subOperatorList, input_obj, scale_helper, LOOP, PRINT_LOG)
@@ -203,6 +214,10 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
         try:
             log.clear_thread_context()
             log.reset_thread_handler()
+        except Exception:
+            pass
+        try:
+            autogui.clear_thread_notifications()
         except Exception:
             pass
 

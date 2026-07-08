@@ -8,7 +8,7 @@ import re
 import threading
 from pathlib import Path
 from . import log
-from . import notifier
+from . import notification_runtime
 from .scaleHelper import ScaleHelper
 from .parser import GetCsv
 from .ocr import OCR
@@ -307,7 +307,7 @@ class AutoOperator:
             case 'ocr':
                 operationWait, indexChangeFunc, operationWaitRandom = self.Ocr(operation)
             case 'notify':
-                notifier.notify(operateParam, beep=True)
+                notification_runtime.notify_operation(operateParam)
             case 'jmp':
                 jmp = self.Jump(operateParam)
                 if self._printLog:

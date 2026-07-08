@@ -22,21 +22,21 @@
 
 1. `main.py` 解析参数并初始化 `ScaleHelper`、OCR 预加载、输入模式。
 2. `autogui.parser.GetCsv()` 读取并缓存 CSV，返回 `index -> operation dict`。
-3. 若配置目录存在 `recovery.csv`，`main.py` 会额外创建 watchdog / recovery 运行时；否则保持旧的直接执行模式。
+3. `main.py` 会先解析层级 `runtime.json`，再按 `watchdog.mode` 判断是否创建 watchdog 运行时。
 4. `autogui.autoOperator.AutoOperator` 按序号解释执行节点。
 5. 普通 `pic/ocr` 节点可直接定位，也可走分支跳转或启动子流程。
 6. `script` 节点通过 `autogui.script_runtime.execute_script_node()` 加载配置目录内的 Python 脚本执行。
-7. 启用了 recovery 的 config 在判定卡死后，会执行同目录下的 `recovery.csv`；恢复成功后清空共享业务 `state` 并从 `main.csv` 重启整个 config。
-8. 每次真正启动 `recovery.csv` 前，运行时都会额外抓取一张完整虚拟桌面的全屏截图，输出到 `screenshot/recovery_{config_name}_{flow}_{index}_{timestamp}.png`，与前后台模式和目标窗口配置无关。
+7. 启用了 watchdog 且当前 config 存在 `recovery.csv` 时，主流程在判定卡死后会执行同目录下的 `recovery.csv`；恢复成功后清空共享业务 `state` 并从 `main.csv` 重启整个 config。
+8. 每次进入 stall 处理链时，运行时都会额外抓取一张完整虚拟桌面的全屏截图，输出到 `screenshot/stall_{config_name}_{flow}_{index}_{timestamp}.png`，与前后台模式和目标窗口配置无关。
 
 ## CSV 约定
 
 - 列定义统一在 `csv_schema.py`。
 - 运行时真正依赖的是中文列名，不是编辑器内部字段名。
 - `main.csv` 是默认入口；其他普通 `.csv` 可被当作子流程启动。
-- `recovery.csv` 是可选的 config 级统一恢复流程；只有它存在时才启用 watchdog / recovery。
+- `recovery.csv` 是可选的 config 级统一恢复流程；是否启用 watchdog 由 `runtime.json.watchdog.mode` 决定。
 - `*_resource.csv` 不是流程文件，只给 `script` 节点提供资源。
-- `runtime.json` 是可选的层级运行参数文件，用来配置 watchdog / recovery 阈值以及后续其他运行时配置。
+- `runtime.json` 是可选的层级运行参数文件，用来配置 watchdog / recovery 阈值、stall 终态通知以及 `notify` 节点通知策略。
 - `runtime.json` 默认从 `config/` 根目录开始，沿当前 config 路径逐级合并；它的加载与 `recovery.csv` 是否存在无关。
 - 解析缓存键是 `config_path/file_name`，因此修改 CSV 后 **不会自动生效**，必须手动重载。
 
@@ -54,7 +54,8 @@
 - `pic` / `ocr` 没有分支参数时，会持续重试直到命中，然后将鼠标移动到目标中心。
 - `pic` 的彩色匹配不是走默认灰度模板匹配，而是 `imageMatcher.py` 中的 `cv2.TM_SQDIFF_NORMED` 分支。
 - `write` 实际实现是 `pyperclip.copy(...)` 后发送 `Ctrl+V`，不是逐字输入。
-- 启用了 recovery 的 config 会按“无进展窗口”判定卡死：自上一次有效操作以来，如果持续只有观察/跳转类动作，并同时超过时间阈值与非有效操作次数阈值，就会触发 `recovery.csv`。
+- 启用了 watchdog 的 config 会按“无进展窗口”判定卡死：自上一次有效操作以来，如果持续只有观察/跳转类动作，并同时超过时间阈值与非有效操作次数阈值，就会进入 stall 处理链。
+- 若 stall 后没有 `recovery.csv`、recovery 超限、recovery 失败或 recovery 再次 stall，就会进入 `on_stall_unresolved` 终态：按配置通知后终止当前实例。
 - `notify`、`mMove`、`mMoveTo` 不算有效操作；脚本中的 `ctx.find_image`、`ctx.find_text`、`ctx.sleep` 也只算观察，不会刷新 watchdog。
 
 ## `pic` / `ocr` 分支语义
@@ -99,19 +100,28 @@
 
 - `runtime.json` 搜索范围：默认从仓库 `config/runtime.json` 一直到当前 config 目录下的 `runtime.json`
 - 字段：
+  - `watchdog.mode`
   - `watchdog.stall_timeout_seconds`
   - `watchdog.stall_non_progress_ops`
   - `watchdog.recovery_limit`
-  - `recovery_watchdog.stall_timeout_seconds`
-  - `recovery_watchdog.stall_non_progress_ops`
+  - `watchdog.recovery_watchdog.stall_timeout_seconds`
+  - `watchdog.recovery_watchdog.stall_non_progress_ops`
+  - `on_stall_unresolved.local_notify`
+  - `on_stall_unresolved.remote_notify`
+  - `notification.notify_operation.local_notify`
+  - `notification.notify_operation.remote_notify`
+  - `notification.remote.enabled`
+  - `notification.remote.sendkey`
+  - `notification.remote.sendkey_env`
 - 层级合并：
   - 父目录先加载，子目录后覆盖
   - 对象字段递归合并
   - 标量、数组、`null` 按子目录整值覆盖
 - 字段回落：
   - 主流程：`watchdog -> 框架默认值`
-  - recovery 流程：`recovery_watchdog -> watchdog -> 框架默认值`
-- `runtime.json` 是否存在不会影响 recovery 机制是否启动；recovery 启动仍然只由当前 config 目录中的 `recovery.csv` 决定。
+  - recovery 流程：`watchdog.recovery_watchdog -> watchdog -> 框架默认值`
+- `watchdog.mode=auto` 只会因为当前 config 存在 `recovery.csv`，或 `on_stall_unresolved.remote_notify=true` 而自动启用 watchdog；本地通知不会影响这个判定。
+- `runtime.json` 是否存在不会影响 `recovery.csv` 是否可用；但 watchdog 是否启动不再只由 `recovery.csv` 决定。
 - `recovery_limit < 0` 表示无限次恢复。
 
 ## 输入模式

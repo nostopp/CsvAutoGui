@@ -28,14 +28,22 @@
 
 ### 可选的全局恢复机制
 
-- 当配置目录下存在 `recovery.csv` 时，运行时会自动启用 watchdog / recovery 系统。
-- 当配置目录下不存在 `recovery.csv` 时，运行时保持旧行为，不做卡死检测，也不会自动恢复。
-- 恢复语义为：
+- 是否启用 watchdog 由 `runtime.json.watchdog.mode` 决定：
+  - `off`：强制关闭 watchdog
+  - `auto`：当配置目录存在 `recovery.csv`，或 `on_stall_unresolved.remote_notify=true` 时启用 watchdog
+  - `on`：强制启用 watchdog
+- 默认值是 `auto`，因此旧配置仍保持兼容语义：只要没有 `recovery.csv` 且没有显式要求 unresolved 远程通知，就不会自动监控卡死。
+- stall 语义为“自上次有效操作以来持续无进展”，但只有当自动闭环失败后，才会进入 `on_stall_unresolved` 终态。
+- 终态语义为：
+  - 主流程 stall 且没有 `recovery.csv`
+  - 主流程 stall，但 `recovery_limit` 已达上限
+  - `recovery.csv` 抛异常或自己再次 stall
+  - 以上情况都会先抓取一次完整虚拟桌面的全屏截图，保存到 `screenshot/stall_{config_name}_{flow}_{index}_{timestamp}.png`
+  - 然后按 `on_stall_unresolved` 触发本地通知和/或远程通知，最后终止当前实例
+- recovery 成功语义保持不变：
   - 主流程长时间没有产生“有效操作”时，运行时执行 `recovery.csv`
-  - 每次真正开始执行 `recovery.csv` 前，运行时会先抓取一次完整虚拟桌面的全屏截图，保存到 `screenshot/recovery_{config_name}_{flow}_{index}_{timestamp}.png`
   - `recovery.csv` 正常执行到结尾，就视为恢复成功
   - 恢复成功后会清空本轮运行的共享 `state`，并从 `main.csv` 第一步重新开始
-  - `recovery.csv` 自己如果抛异常或再次卡死，当前实例直接终止
 
 ### `runtime.json`
 
@@ -46,33 +54,57 @@
 ```json
 {
   "watchdog": {
+    "mode": "auto",
     "stall_timeout_seconds": 60,
     "stall_non_progress_ops": 60,
-    "recovery_limit": 3
+    "recovery_limit": 3,
+    "recovery_watchdog": {
+      "stall_timeout_seconds": 30,
+      "stall_non_progress_ops": 20
+    }
   },
-  "recovery_watchdog": {
-    "stall_timeout_seconds": 30,
-    "stall_non_progress_ops": 20
+  "on_stall_unresolved": {
+    "local_notify": true,
+    "remote_notify": false
+  },
+  "notification": {
+    "notify_operation": {
+      "local_notify": true,
+      "remote_notify": false
+    },
+    "remote": {
+      "enabled": true,
+      "sendkey_env": "CSV_AUTOGUI_SERVERCHAN_SENDKEY"
+    }
   }
 }
 ```
 
 - 字段回落规则：
   - 主流程：`watchdog.{field} -> 框架默认值`
-  - recovery 流程：`recovery_watchdog.{field} -> watchdog.{field} -> 框架默认值`
+  - recovery 流程：`watchdog.recovery_watchdog.{field} -> watchdog.{field} -> 框架默认值`
 - 层级合并规则：
   - 搜索范围：从 `config/runtime.json` 一直到当前 config 目录下的 `runtime.json`
   - 合并顺序：父目录先加载，子目录后覆盖
   - 对象字段：递归合并
   - 标量、数组、`null`：子目录整值覆盖父目录
+- `watchdog.mode` 只支持 `off`、`auto`、`on`。
+- `on_stall_unresolved` 只在“自动恢复链已经无法闭环”时触发，不会在首次检测到 stall 时触发。
+- `watchdog.mode=auto` 不会因为本地通知可用而自动启用 watchdog；只有 `recovery.csv` 或 `on_stall_unresolved.remote_notify=true` 才会触发自动启用。
+- `notification.notify_operation` 控制普通 `notify` 节点的默认通知通道。
+- `notification.remote` 当前只支持 [Server酱³](https://sc3.ft07.com/)：
+  - `enabled`：是否允许远程发送
+  - `sendkey`：直接写死 sendkey
+  - `sendkey_env`：从环境变量读取 sendkey；仅当 `sendkey` 未配置时使用
 - `recovery_limit` 只属于主流程 `watchdog`。
 - `recovery_limit < 0` 表示 recovery 次数无限制。
 
 ### 什么算“卡死”
 
-- 只有同时满足下面两项，才会触发 recovery：
+- 只有同时满足下面两项，watchdog 才会判定当前流程 stall：
   - 距离上一次有效操作超过 `stall_timeout_seconds`
   - 自上一次有效操作以来，累计的非有效操作次数达到 `stall_non_progress_ops`
+- stall 后不一定立刻通知；只有 recovery 不存在、recovery 超限、recovery 失败或 recovery 再次 stall 时，才会触发 `on_stall_unresolved`。
 - 有效操作：
   - `click` `mDown` `mUp` `press` `kDown` `kUp` `write`
   - `script` 中通过 `ctx.input.click/press/keyDown/keyUp/hotkey/...` 发出的真实输入
@@ -153,7 +185,7 @@
 | ocr | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | OCR 识别 |
 | script | script.py / script.py;name_resource.csv | 运行配置目录中的 Python 脚本，入口固定为 `run(ctx)` |
 | resource | pic;alias / ocr;alias / jmp;alias | 仅用于 `*_resource.csv`，声明脚本可读取的图片、OCR 或跳转资源 |
-| notify | text | 通知 |
+| notify | text | 通知。默认仍会本地弹窗；是否追加远程通知由 `notification.notify_operation` 控制 |
 | jmp | index / 标记 | 跳转 |
 
 ---
@@ -258,7 +290,6 @@ def run(ctx):
   - 获取当前截图。传 `region` 时会裁出对应区域并返回。
 - `ctx.sleep(seconds)`
   - 脚本内等待指定秒数。
-
 ## 其他说明
 
 - `pic` 与 `ocr` 操作在没有操作参数时，默认不断找图直到找到后将鼠标移至图片中心。

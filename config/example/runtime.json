@@ -1,11 +1,27 @@
 {
   "watchdog": {
+    "mode": "auto",
     "stall_timeout_seconds": 10,
     "stall_non_progress_ops": 3,
-    "recovery_limit": 2
+    "recovery_limit": 2,
+    "recovery_watchdog": {
+      "stall_timeout_seconds": 30,
+      "stall_non_progress_ops": 20
+    }
   },
-  "recovery_watchdog": {
-    "stall_timeout_seconds": 30,
-    "stall_non_progress_ops": 20
+  "on_stall_unresolved": {
+    "local_notify": true,
+    "remote_notify": true
+  },
+  "notification": {
+    "notify_operation": {
+      "local_notify": true,
+      "remote_notify": false
+    },
+    "remote": {
+      "enabled": true,
+      "sendkey": "YOUR_SERVERCHAN_SENDKEY",
+      "sendkey_env": "CSV_AUTOGUI_SERVERCHAN_SENDKEY"
+    }
   }
 }

@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from pathlib import Path
 DEFAULT_STALL_TIMEOUT_SECONDS = 90.0
 DEFAULT_STALL_NON_PROGRESS_OPS = 60
 DEFAULT_RECOVERY_LIMIT = -1
+DEFAULT_WATCHDOG_MODE = "auto"
 
 
 @dataclass(frozen=True)
@@ -19,6 +21,24 @@ class WatchdogSettings:
 class WatchdogThresholds:
     stall_timeout_seconds: float
     stall_non_progress_ops: int
+
+
+@dataclass(frozen=True)
+class NotificationRouteSettings:
+    local_notify: bool
+    remote_notify: bool
+
+
+@dataclass(frozen=True)
+class RemoteNotificationSettings:
+    enabled: bool
+    sendkey: str | None
+
+
+@dataclass(frozen=True)
+class NotificationSettings:
+    notify_operation: NotificationRouteSettings
+    remote: RemoteNotificationSettings
 
 
 class RuntimeConfigResolver:
@@ -110,17 +130,77 @@ class RuntimeConfigResolver:
             raise ValueError(f"runtime.json 中 {name} 必须是对象")
         return section
 
+    def _get_watchdog_section(self) -> dict:
+        return self._get_section("watchdog")
+
+    def _get_recovery_watchdog_section(self) -> dict:
+        watchdog = self._get_watchdog_section()
+        nested = watchdog.get("recovery_watchdog")
+        if nested is None:
+            return self._get_section("recovery_watchdog")
+        if not isinstance(nested, dict):
+            raise ValueError("runtime.json 中 watchdog.recovery_watchdog 必须是对象")
+        return nested
+
+    @staticmethod
+    def _get_subsection(section: dict, name: str) -> dict:
+        child = section.get(name, {})
+        if child is None:
+            return {}
+        if not isinstance(child, dict):
+            raise ValueError(f"runtime.json 中 {name} 必须是对象")
+        return child
+
     def get_watchdog_value(self, field: str):
-        watchdog = self._get_section("watchdog")
+        watchdog = self._get_watchdog_section()
         if field in watchdog:
             return watchdog[field]
         return self._default_value(field)
 
     def get_recovery_watchdog_value(self, field: str):
-        recovery_watchdog = self._get_section("recovery_watchdog")
+        recovery_watchdog = self._get_recovery_watchdog_section()
         if field in recovery_watchdog:
             return recovery_watchdog[field]
         return self.get_watchdog_value(field)
+
+    def get_watchdog_mode(self) -> str:
+        return self._coerce_watchdog_mode(self.get_watchdog_value("mode"))
+
+    def should_enable_watchdog(self) -> bool:
+        mode = self.get_watchdog_mode()
+        if mode == "off":
+            return False
+        if mode == "on":
+            return True
+        if self.recovery_enabled:
+            return True
+        return self.get_unresolved_stall_policy().remote_notify
+
+    def get_unresolved_stall_policy(self) -> NotificationRouteSettings:
+        section = self._get_section("on_stall_unresolved")
+        return NotificationRouteSettings(
+            local_notify=self._coerce_bool(section.get("local_notify", False)),
+            remote_notify=self._coerce_bool(section.get("remote_notify", False)),
+        )
+
+    def get_notification_settings(self) -> NotificationSettings:
+        notification = self._get_section("notification")
+        notify_operation = self._get_subsection(notification, "notify_operation")
+        remote = self._get_subsection(notification, "remote")
+        sendkey = self._resolve_string_or_env(
+            remote.get("sendkey"),
+            remote.get("sendkey_env"),
+        )
+        return NotificationSettings(
+            notify_operation=NotificationRouteSettings(
+                local_notify=self._coerce_bool(notify_operation.get("local_notify", True)),
+                remote_notify=self._coerce_bool(notify_operation.get("remote_notify", False)),
+            ),
+            remote=RemoteNotificationSettings(
+                enabled=self._coerce_bool(remote.get("enabled", False)),
+                sendkey=sendkey,
+            ),
+        )
 
     def get_watchdog_settings(self) -> WatchdogSettings:
         return WatchdogSettings(
@@ -140,6 +220,7 @@ class RuntimeConfigResolver:
             "stall_timeout_seconds": DEFAULT_STALL_TIMEOUT_SECONDS,
             "stall_non_progress_ops": DEFAULT_STALL_NON_PROGRESS_OPS,
             "recovery_limit": DEFAULT_RECOVERY_LIMIT,
+            "mode": DEFAULT_WATCHDOG_MODE,
         }
         if field not in defaults:
             raise KeyError(f"未知 watchdog 配置字段: {field}")
@@ -162,3 +243,39 @@ class RuntimeConfigResolver:
     @staticmethod
     def _coerce_recovery_limit(value) -> int:
         return int(value)
+
+    @staticmethod
+    def _coerce_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "on", "yes"}:
+                return True
+            if normalized in {"false", "0", "off", "no"}:
+                return False
+        raise ValueError("布尔配置必须是 true/false，或等价的 on/off、yes/no、1/0")
+
+    @staticmethod
+    def _coerce_watchdog_mode(value) -> str:
+        mode = str(value).strip().lower()
+        if mode not in {"off", "auto", "on"}:
+            raise ValueError("watchdog.mode 必须是 off、auto 或 on")
+        return mode
+
+    @staticmethod
+    def _resolve_string_or_env(value, env_name) -> str | None:
+        if value is not None:
+            text = str(value).strip()
+            if text:
+                return text
+        if env_name is None:
+            return None
+        env_key = str(env_name).strip()
+        if not env_key:
+            return None
+        env_value = os.getenv(env_key)
+        if env_value is None:
+            return None
+        env_value = env_value.strip()
+        return env_value or None
