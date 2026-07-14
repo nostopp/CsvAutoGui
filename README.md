@@ -185,12 +185,12 @@
 | kDown | key | 键盘按键按下（参数必须） |
 | kUp | key | 键盘按键松开（参数必须） |
 | write | text | 键盘输入（参数必须） |
-| pic | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | 识图 |
-| ocr | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | OCR 识别 |
+| pic | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | 识图；双跳转目标为负整数时立即结束当前流程 |
+| ocr | exist;fileName.csv / notExist;fileName.csv / exist;index;index / notExist;index;index | OCR 识别；双跳转目标为负整数时立即结束当前流程 |
 | script | script.py / script.py;name_resource.csv | 运行配置目录中的 Python 脚本，入口固定为 `run(ctx)` |
 | resource | pic;alias / ocr;alias / jmp;alias | 仅用于 `*_resource.csv`，声明脚本可读取的图片、OCR 或跳转资源 |
 | notify | text | 通知。默认仍会本地弹窗；是否追加远程通知由 `notification.notify_operation` 控制 |
-| jmp | index / 标记 | 跳转 |
+| jmp | index / 标记 / 负整数 | 跳转；负整数立即结束当前流程 |
 
 ---
 
@@ -242,7 +242,7 @@ def run(ctx):
 - `self.ctx`
   - 当前脚本上下文对象，几乎所有运行时能力都从这里取。
 - `self.jump(target)`
-  - 跳到当前调用脚本的 CSV 中某个真实目标。`target` 可以是跳转标记或序号。
+  - 跳到当前调用脚本的 CSV 中某个真实目标。`target` 可以是跳转标记或序号；负整数会立即结束当前流程。
 - `self.jump_resource(name)`
   - 读取 `resource(jmp;name)` 对应的真实目标并跳转。适合把脚本逻辑和真实跳转标记解耦。
 - `self.next_step()`
@@ -302,7 +302,7 @@ def run(ctx):
 - `pic` 与 `ocr` 操作在没有操作参数时，默认不断找图直到找到后将鼠标移至图片中心。
 - `pic` 与 `ocr` 在使用 `exist` 或 `notExist` 后有两种配置     
    - 配置你要执行的 file.csv, 满足条件将会开启新的csv文件并执行，在执行完毕后会回到该csv并执行下一行，若不满足条件会继续执行下一行   
-   - 配置 int;int,若满足条件则跳转到第一个int配置的序号步骤，不满足则跳转到第二个int配置的步骤序号
+   - 配置 index;index，若满足条件则跳转到第一个目标，不满足则跳转到第二个目标；任一目标为负整数时立即结束当前流程，不再执行后续节点或等待时间
 - `recovery.csv` 不是新的节点类型，而是一份普通 flow 文件；里面同样可以使用 `pic`、`ocr`、`jmp`、子流程和 `script`。
 
 ---

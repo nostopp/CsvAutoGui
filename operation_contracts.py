@@ -257,6 +257,15 @@ def require_operation_contract(
     return contract
 
 
+def is_terminal_jump_target(value: object) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        return int(value) < 0
+    except (TypeError, ValueError):
+        return False
+
+
 def iter_operation_contracts(
     *,
     normal_flow: bool | None = None,

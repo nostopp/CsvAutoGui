@@ -36,7 +36,12 @@ from PySide6.QtWidgets import (
 
 from autogui.infrastructure.paths import normalize_config_dir
 from autogui.runtime.cache import clear_runtime_caches
-from operation_contracts import OperationType, get_operation_contract, require_operation_contract
+from operation_contracts import (
+    OperationType,
+    get_operation_contract,
+    is_terminal_jump_target,
+    require_operation_contract,
+)
 from csv_editor.adapters import RuntimeOcrPreviewAdapter
 from csv_editor.controllers.change_set import ChangeImpact, EditorChangeSet
 from csv_editor.controllers.document_controller import EditorDocumentController
@@ -800,7 +805,17 @@ class EditorMainWindow(QMainWindow):
         references = self._target_references(node)
         if not references:
             return ""
-        return "\n".join(f"{label} -> {target}" for label, target in references if target)
+        return "\n".join(
+            f"{label} -> {self._format_target_label(target)}"
+            for label, target in references
+            if target
+        )
+
+    @staticmethod
+    def _format_target_label(target: str) -> str:
+        if is_terminal_jump_target(target):
+            return f"结束当前流程 ({target})"
+        return target
 
     def _resolvable_target_references(self, node: OperationNode) -> list[tuple[str, str]]:
         flow = self.current_flow

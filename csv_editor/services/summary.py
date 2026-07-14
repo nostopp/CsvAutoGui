@@ -5,6 +5,7 @@ from operation_contracts import (
     OperationField,
     OperationType,
     get_operation_contract,
+    is_terminal_jump_target,
 )
 
 from csv_editor.domain.enums import BranchMode
@@ -38,6 +39,8 @@ def summarize_node(node: OperationNode) -> str:
     if operation == OperationType.NOTIFY.value:
         return f"通知 {node.param_text or '(空)'}"
     if operation == OperationType.JUMP.value:
+        if is_terminal_jump_target(node.param_text):
+            return "结束当前流程"
         return f"跳转到 {node.param_text or '(未设置)'}"
     return f"未知操作 {operation or '(空)'}"
 
@@ -51,9 +54,16 @@ def _summarize_detect(label: str, node: OperationNode) -> str:
         return f"{label}判断 {target} -> {node.branch.trigger.value} 执行 {node.branch.primary_target}"
 
     return (
-        f"{label}判断 {target} -> {node.branch.trigger.value} 时到 {node.branch.primary_target}，"
-        f"否则到 {node.branch.secondary_target or '(未设置)'}"
+        f"{label}判断 {target} -> {node.branch.trigger.value} 时到 "
+        f"{_summarize_branch_target(node.branch.primary_target)}，"
+        f"否则到 {_summarize_branch_target(node.branch.secondary_target)}"
     )
+
+
+def _summarize_branch_target(target: str) -> str:
+    if is_terminal_jump_target(target):
+        return "结束当前流程"
+    return target or "(未设置)"
 
 
 def summarize_node_timing(node: OperationNode) -> str:

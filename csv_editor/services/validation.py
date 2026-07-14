@@ -10,6 +10,7 @@ from operation_contracts import (
     OperationType,
     ParamKind,
     get_operation_contract,
+    is_terminal_jump_target,
 )
 
 from autogui.infrastructure.paths import resolve_config_relative_path
@@ -476,6 +477,8 @@ def _is_jump_target(text: str, jump_marks: set[str]) -> bool:
     if not text:
         return False
     if text in jump_marks:
+        return True
+    if is_terminal_jump_target(text):
         return True
     try:
         int(text)

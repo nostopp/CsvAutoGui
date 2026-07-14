@@ -46,7 +46,7 @@
 
 - 基础输入：`click` `mDown` `mUp` `mMove` `mMoveTo` `press` `kDown` `kUp` `write`
 - 识别节点：`pic` `ocr`
-- 控制流：`jmp`
+- 控制流：`jmp`（跳转目标为负整数时结束当前流程）
 - 扩展能力：`script`
 - 资源声明：`resource`
 - 提醒：`notify`
@@ -63,7 +63,7 @@
 ## `pic` / `ocr` 分支语义
 
 - `exist;file.csv` / `notExist;file.csv`：满足条件时启动子流程，子流程结束后回到当前流程下一行。
-- `exist;A;B` / `notExist;A;B`：进入双跳转模式，`A/B` 可为序号或跳转标记。
+- `exist;A;B` / `notExist;A;B`：进入双跳转模式，`A/B` 可为序号、跳转标记或负整数；负整数会立即结束当前流程，不执行后续节点或等待时间。
 
 这个分支语义同时被：
 

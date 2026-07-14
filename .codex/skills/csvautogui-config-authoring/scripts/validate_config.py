@@ -38,7 +38,7 @@ from csv_schema import (
     COL_SEARCH_TARGET,
     CSV_COLUMNS,
 )
-from operation_contracts import OperationType
+from operation_contracts import OperationType, is_terminal_jump_target
 
 
 PHASE_FINAL = "final"
@@ -233,6 +233,8 @@ class ConfigValidator:
             return
 
         for target_location, label, target in numeric_jump_targets:
+            if is_terminal_jump_target(target):
+                continue
             if target not in seen_indexes:
                 self._add(
                     "ERROR",

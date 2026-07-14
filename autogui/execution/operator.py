@@ -5,7 +5,11 @@ import pyperclip
 import time
 import random
 import re
-from operation_contracts import OperationType, require_operation_contract
+from operation_contracts import (
+    OperationType,
+    is_terminal_jump_target,
+    require_operation_contract,
+)
 from ..flow.models import CompiledFlow, CompiledOperation
 from ..infrastructure import log
 from ..notifications import runtime as notification_runtime
@@ -112,6 +116,8 @@ class AutoOperator:
 
     def _resolve_script_jump(self, target: int | str) -> int:
         jump = self.Jump(target)
+        if is_terminal_jump_target(jump):
+            return int(jump)
         if isinstance(jump, str):
             try:
                 jump = int(jump)
@@ -138,6 +144,11 @@ class AutoOperator:
         operation = self._operations[self._cursor]
 
         operationWait, indexChangeFunc, operationWaitRandom = self.Operate(operation)
+        target_index = indexChangeFunc(operation.index) if indexChangeFunc else None
+        if target_index is not None and is_terminal_jump_target(target_index):
+            self._cursor = len(self._operations)
+            return False
+
         waitTime = 0
         if operationWait and operationWait > 0:
             if not operationWaitRandom:
@@ -154,8 +165,7 @@ class AutoOperator:
                 log.debug(f'等待 {waitTime} s')
             time.sleep(waitTime)
 
-        if indexChangeFunc:
-            target_index = indexChangeFunc(operation.index)
+        if target_index is not None:
             if target_index not in self._index_to_cursor:
                 raise KeyError(f'无效的跳转目标: {target_index}')
             self._cursor = self._index_to_cursor[target_index]
