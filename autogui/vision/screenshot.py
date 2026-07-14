@@ -6,7 +6,7 @@ import pyautogui
 import winsound
 import win32con
 import threading
-from . import log
+from ..infrastructure import log
 
 screenshotDir = 'screenshot'
 

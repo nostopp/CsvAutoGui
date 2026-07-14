@@ -6,8 +6,9 @@ from threading import Lock
 from typing import Any
 
 from PySide6.QtCore import QObject, Signal
+from operation_contracts import OperationType, get_operation_contract
 
-from csv_editor.domain.enums import BranchMode, BranchTrigger, OperationType
+from csv_editor.domain.enums import BranchMode, BranchTrigger
 from csv_editor.domain.models import BranchConfig, FlowDocument, OperationNode
 
 STOP_HOTKEY = "shift+x"
@@ -15,19 +16,15 @@ SHIFT_KEY_NAMES = {"shift", "left shift", "right shift"}
 STOP_HOTKEY_KEYS = SHIFT_KEY_NAMES | {"x"}
 MERGE_THRESHOLD_SECONDS = 0.5
 HOTKEY_STRIP_WINDOW_SECONDS = 0.6
-VISUAL_MARK_WAIT_SECONDS = {
-    "ocr": "0.5",
-    "pic": "0.3",
-}
-VISUAL_MARK_CONFIDENCE = {
-    "ocr": "0.9",
-    "pic": "0.8",
-}
-
-
 class VisualMarkKind:
-    OCR = "ocr"
-    PIC = "pic"
+    OCR = OperationType.OCR.value
+    PIC = OperationType.PIC.value
+
+
+VISUAL_MARK_WAIT_SECONDS = {
+    VisualMarkKind.OCR: "0.5",
+    VisualMarkKind.PIC: "0.3",
+}
 
 
 class VisualMarkAction:
@@ -465,11 +462,13 @@ class RecordingService(QObject):
         return [self._build_move_rel_node(event.screen_x - center_x, event.screen_y - center_y)]
 
     def _build_visual_mark_node(self, mark: VisualMarkEvent, counter: int) -> OperationNode:
+        contract = get_operation_contract(mark.kind)
+        confidence = None if contract is None else contract.default_confidence
         node = OperationNode(
             operation=mark.kind,
             search_target=mark.search_target,
             region_text=mark.region_text,
-            confidence_text=VISUAL_MARK_CONFIDENCE.get(mark.kind, ""),
+            confidence_text="" if confidence is None else str(confidence),
             note=mark.note,
         )
         if mark.action == VisualMarkAction.LOCATE:

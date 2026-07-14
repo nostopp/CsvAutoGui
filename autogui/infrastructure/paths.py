@@ -6,7 +6,7 @@ from pathlib import Path
 def application_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def logical_abs_path(path: str | os.PathLike, base_dir: str | os.PathLike | None = None) -> Path:
@@ -14,6 +14,43 @@ def logical_abs_path(path: str | os.PathLike, base_dir: str | os.PathLike | None
     if not raw_path.is_absolute() and base_dir is not None:
         raw_path = Path(base_dir) / raw_path
     return Path(os.path.abspath(os.path.normpath(os.fspath(raw_path))))
+
+
+def resolve_config_relative_path(
+    config_dir: str | os.PathLike,
+    relative_path: str | os.PathLike,
+    *,
+    must_exist: bool = False,
+    allowed_suffixes: tuple[str, ...] | None = None,
+) -> Path:
+    path = Path(relative_path)
+    if path.is_absolute() or path.drive:
+        raise ValueError(f"只支持相对配置目录的路径: {relative_path}")
+
+    base_dir = logical_abs_path(config_dir)
+    lexical_path = logical_abs_path(path, base_dir)
+    try:
+        lexical_path.relative_to(base_dir)
+    except ValueError as exc:
+        raise ValueError(f"路径超出配置目录: {relative_path}") from exc
+
+    resolved_base = base_dir.resolve()
+    resolved_path = lexical_path.resolve()
+    try:
+        resolved_path.relative_to(resolved_base)
+    except ValueError as exc:
+        raise ValueError(f"路径超出配置目录: {relative_path}") from exc
+
+    if allowed_suffixes is not None:
+        normalized_name = resolved_path.name.casefold()
+        if not any(normalized_name.endswith(suffix.casefold()) for suffix in allowed_suffixes):
+            allowed_text = ", ".join(allowed_suffixes)
+            raise ValueError(f"路径后缀不受支持，应为: {allowed_text}")
+
+    if must_exist and not resolved_path.exists():
+        raise FileNotFoundError(f"路径不存在: {resolved_path}")
+
+    return resolved_path
 
 
 def default_config_root() -> Path:

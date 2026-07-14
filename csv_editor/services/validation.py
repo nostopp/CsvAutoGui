@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from csv_editor.domain.enums import OperationType, ValidationSeverity
+from operation_contracts import (
+    OperationCategory,
+    OperationContract,
+    OperationField,
+    OperationType,
+    ParamKind,
+    get_operation_contract,
+)
+
+from autogui.infrastructure.paths import resolve_config_relative_path
+from csv_editor.domain.enums import ValidationSeverity
 from csv_editor.domain.models import EditorDocument, FlowDocument, OperationNode, ValidationIssue
 from csv_editor.io.csv_codec import is_resource_flow_filename, parse_resource_param, parse_script_param
 
@@ -16,145 +27,311 @@ def validate_document(document: EditorDocument) -> list[ValidationIssue]:
 
 
 def validate_flow(root_path: Path, flow: FlowDocument, flow_lookup: dict[str, FlowDocument] | None = None) -> list[ValidationIssue]:
+    context = _build_flow_validation_context(root_path, flow, flow_lookup)
     issues: list[ValidationIssue] = []
-    flow_lookup = flow_lookup or {}
-    is_resource_flow = is_resource_flow_filename(flow.filename)
-    seen_marks: set[str] = set()
-    seen_resource_aliases: set[str] = set()
-    jump_marks: set[str] = {node.jump_mark for node in flow.nodes if node.jump_mark} if not is_resource_flow else set()
+    for node in flow.nodes:
+        issues.extend(_validate_node_with_context(context, node))
+    return issues
 
-    for expected_index, node in enumerate(flow.nodes, start=1):
-        if node.index != expected_index:
+
+def validate_node(
+    root_path: Path,
+    flow: FlowDocument,
+    node: OperationNode,
+    flow_lookup: dict[str, FlowDocument] | None = None,
+) -> list[ValidationIssue]:
+    if all(candidate is not node for candidate in flow.nodes):
+        raise ValueError(f"节点不属于流程 {flow.filename}: {node.node_id}")
+    context = _build_flow_validation_context(root_path, flow, flow_lookup)
+    return _validate_node_with_context(context, node)
+
+
+@dataclass(frozen=True, slots=True)
+class _FlowValidationContext:
+    root_path: Path
+    flow: FlowDocument
+    flow_lookup: dict[str, FlowDocument]
+    is_resource_flow: bool
+    expected_indexes: dict[int, int]
+    jump_marks: set[str]
+    first_jump_mark_nodes: dict[str, int]
+    first_resource_alias_nodes: dict[str, int]
+
+
+def _build_flow_validation_context(
+    root_path: Path,
+    flow: FlowDocument,
+    flow_lookup: dict[str, FlowDocument] | None,
+) -> _FlowValidationContext:
+    is_resource_flow = is_resource_flow_filename(flow.filename)
+    first_jump_mark_nodes: dict[str, int] = {}
+    first_resource_alias_nodes: dict[str, int] = {}
+    for node in flow.nodes:
+        if node.jump_mark and not is_resource_flow:
+            first_jump_mark_nodes.setdefault(node.jump_mark, id(node))
+        if is_resource_flow and node.operation == OperationType.RESOURCE.value:
+            parsed = parse_resource_param(node.param_text.strip())
+            if parsed is not None:
+                first_resource_alias_nodes.setdefault(parsed[1], id(node))
+    return _FlowValidationContext(
+        root_path=root_path,
+        flow=flow,
+        flow_lookup=flow_lookup or {},
+        is_resource_flow=is_resource_flow,
+        expected_indexes={id(node): index for index, node in enumerate(flow.nodes, start=1)},
+        jump_marks=set(first_jump_mark_nodes),
+        first_jump_mark_nodes=first_jump_mark_nodes,
+        first_resource_alias_nodes=first_resource_alias_nodes,
+    )
+
+
+def _validate_node_with_context(
+    context: _FlowValidationContext,
+    node: OperationNode,
+) -> list[ValidationIssue]:
+    flow = context.flow
+    issues: list[ValidationIssue] = []
+    expected_index = context.expected_indexes[id(node)]
+    if node.index != expected_index:
+        issues.append(
+            ValidationIssue(
+                severity=ValidationSeverity.WARNING,
+                flow_name=flow.filename,
+                node_id=node.node_id,
+                message=f"序号 {node.index} 将在保存时重排为 {expected_index}",
+            )
+        )
+
+    if not node.operation:
+        issues.append(_issue(flow, node, "操作不能为空"))
+        return issues
+
+    if (
+        node.jump_mark
+        and not context.is_resource_flow
+        and context.first_jump_mark_nodes.get(node.jump_mark) != id(node)
+    ):
+        issues.append(_issue(flow, node, f"跳转标记重复: {node.jump_mark}"))
+
+    contract = get_operation_contract(node.operation)
+    if contract is None:
+        issues.append(_issue(flow, node, f"不支持的操作类型: {node.operation}"))
+        return issues
+
+    if context.is_resource_flow:
+        if not contract.allowed_in_resource_flow:
+            issues.append(_issue(flow, node, "资源文件中只允许使用 resource 节点"))
+        else:
+            parsed = parse_resource_param(node.param_text.strip())
+            duplicate_alias = (
+                parsed is not None
+                and context.first_resource_alias_nodes.get(parsed[1]) != id(node)
+            )
+            issues.extend(
+                _validate_resource_node(
+                    context.root_path,
+                    flow,
+                    node,
+                    duplicate_alias=duplicate_alias,
+                )
+            )
+        return issues
+
+    if not contract.allowed_in_normal_flow:
+        issues.append(_issue(flow, node, "普通流程中不能使用 resource 节点"))
+
+    issues.extend(validate_node_fields(flow, node, contract))
+    issues.extend(
+        validate_node_assets(
+            context.root_path,
+            flow,
+            node,
+            contract,
+            context.flow_lookup,
+        )
+    )
+    issues.extend(
+        _validate_node_references(
+            context.root_path,
+            flow,
+            node,
+            contract,
+            context.jump_marks,
+        )
+    )
+    issues.extend(validate_node_timing_fields(flow, node))
+    return issues
+
+
+def validate_node_fields(
+    flow: FlowDocument,
+    node: OperationNode,
+    contract: OperationContract,
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if (
+        contract.param_kind is ParamKind.COORDINATE_PAIR
+        and not _is_pair_int(node.param_text)
+    ):
+        issues.append(_issue(flow, node, "移动操作参数必须为 x;y"))
+
+    if (
+        contract.param_required
+        and contract.param_kind in {ParamKind.KEY, ParamKind.TEXT, ParamKind.JUMP_TARGET}
+        and not node.param_text.strip()
+    ):
+        issues.append(_issue(flow, node, "当前操作需要操作参数"))
+
+    if contract.category is not OperationCategory.RECOGNITION:
+        return issues
+
+    fields = contract.supported_fields
+    if OperationField.SEARCH_TARGET in fields and not node.search_target.strip():
+        issues.append(_issue(flow, node, "识别节点需要图片或 OCR 目标"))
+    if (
+        OperationField.REGION in fields
+        and node.region_text
+        and not _is_region(node.region_text)
+    ):
+        issues.append(_issue(flow, node, "识别区域必须为 x;y;w;h"))
+    if OperationField.CONFIDENCE in fields and node.confidence_text:
+        if not _is_float(node.confidence_text):
+            issues.append(_issue(flow, node, "置信度必须是数字"))
+        else:
+            confidence = float(node.confidence_text)
+            if confidence < 0 or confidence > 1:
+                issues.append(_issue(flow, node, "置信度必须在 0 到 1 之间"))
+    if (
+        OperationField.RETRY in fields
+        and node.retry_value
+        and not _is_float(node.retry_value)
+    ):
+        issues.append(_issue(flow, node, "重试时间必须是数字"))
+    if (
+        OperationField.RETRY_RANDOM in fields
+        and node.retry_random
+        and not _is_float(node.retry_random)
+    ):
+        issues.append(_issue(flow, node, "重试随机时间必须是数字"))
+    return issues
+
+
+def validate_node_assets(
+    root_path: Path,
+    flow: FlowDocument,
+    node: OperationNode,
+    contract: OperationContract,
+    flow_lookup: dict[str, FlowDocument],
+) -> list[ValidationIssue]:
+    if contract.param_kind is ParamKind.SCRIPT_REFERENCE:
+        return _validate_script_node(root_path, flow, node, flow_lookup)
+
+    if contract.operation is not OperationType.PIC or not node.search_target.strip():
+        return []
+    asset_path = root_path / node.search_target.strip()
+    if asset_path.exists():
+        return []
+    return [
+        ValidationIssue(
+            severity=ValidationSeverity.WARNING,
+            flow_name=flow.filename,
+            node_id=node.node_id,
+            message=f"图片素材不存在: {node.search_target}",
+        )
+    ]
+
+
+def validate_flow_references(
+    root_path: Path,
+    flow: FlowDocument,
+    node: OperationNode,
+    contract: OperationContract,
+    jump_marks: set[str],
+) -> list[ValidationIssue]:
+    return _validate_node_references(
+        root_path,
+        flow,
+        node,
+        contract,
+        jump_marks,
+    )
+
+
+def _validate_node_references(
+    root_path: Path,
+    flow: FlowDocument,
+    node: OperationNode,
+    contract: OperationContract,
+    jump_marks: set[str],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if (
+        contract.param_kind is ParamKind.JUMP_TARGET
+        and node.param_text.strip()
+        and not _is_jump_target(node.param_text, jump_marks)
+    ):
+        issues.append(
+            ValidationIssue(
+                severity=ValidationSeverity.WARNING,
+                flow_name=flow.filename,
+                node_id=node.node_id,
+                message=f"跳转目标可能不存在: {node.param_text}",
+            )
+        )
+
+    if not contract.supports_branch:
+        return issues
+    if node.branch.is_enabled and not node.branch.primary_target.strip():
+        issues.append(_issue(flow, node, "分支目标不能为空"))
+    if node.branch.mode.value == "subflow" and node.branch.primary_target.strip():
+        subflow_path = root_path / node.branch.primary_target.strip()
+        if not subflow_path.exists():
             issues.append(
                 ValidationIssue(
                     severity=ValidationSeverity.WARNING,
                     flow_name=flow.filename,
                     node_id=node.node_id,
-                    message=f"序号 {node.index} 将在保存时重排为 {expected_index}",
+                    message=f"子流程文件不存在: {node.branch.primary_target}",
                 )
             )
-
-        if not node.operation:
-            issues.append(_issue(flow, node, "操作不能为空"))
-            continue
-
-        if node.jump_mark and not is_resource_flow:
-            if node.jump_mark in seen_marks:
-                issues.append(_issue(flow, node, f"跳转标记重复: {node.jump_mark}"))
-            seen_marks.add(node.jump_mark)
-
-        if node.operation not in {item.value for item in OperationType}:
-            issues.append(_issue(flow, node, f"不支持的操作类型: {node.operation}"))
-            continue
-
-        if is_resource_flow:
-            if node.operation != OperationType.RESOURCE.value:
-                issues.append(_issue(flow, node, "资源文件中只允许使用 resource 节点"))
-            else:
-                issues.extend(_validate_resource_node(root_path, flow, node, seen_resource_aliases))
-            continue
-        elif node.operation == OperationType.RESOURCE.value:
-            issues.append(_issue(flow, node, "普通流程中不能使用 resource 节点"))
-
-        if node.operation in {OperationType.MOVE_REL.value, OperationType.MOVE_TO.value} and not _is_pair_int(node.param_text):
-            issues.append(_issue(flow, node, "移动操作参数必须为 x;y"))
-
-        if node.operation in {
-            OperationType.PRESS.value,
-            OperationType.KEY_DOWN.value,
-            OperationType.KEY_UP.value,
-            OperationType.WRITE.value,
-            OperationType.NOTIFY.value,
-            OperationType.JUMP.value,
-        } and not node.param_text.strip():
-            issues.append(_issue(flow, node, "当前操作需要操作参数"))
-
-        if node.operation == OperationType.SCRIPT.value:
-            issues.extend(_validate_script_node(root_path, flow, node, flow_lookup))
-
-        if node.operation == OperationType.JUMP.value and node.param_text.strip():
-            if not _is_jump_target(node.param_text, jump_marks):
-                issues.append(
-                    ValidationIssue(
-                        severity=ValidationSeverity.WARNING,
-                        flow_name=flow.filename,
-                        node_id=node.node_id,
-                        message=f"跳转目标可能不存在: {node.param_text}",
-                    )
+        elif is_resource_flow_filename(node.branch.primary_target.strip()):
+            issues.append(_issue(flow, node, "资源文件不能作为子流程执行"))
+    if node.branch.mode.value == "jump_pair" and node.branch.primary_target.strip():
+        if not _is_jump_target(node.branch.primary_target, jump_marks):
+            issues.append(
+                ValidationIssue(
+                    severity=ValidationSeverity.WARNING,
+                    flow_name=flow.filename,
+                    node_id=node.node_id,
+                    message=f"分支主跳转目标可能不存在: {node.branch.primary_target}",
                 )
+            )
+    if node.branch.mode.value == "jump_pair" and not node.branch.secondary_target.strip():
+        issues.append(_issue(flow, node, "双跳转分支需要第二目标"))
+    if node.branch.mode.value == "jump_pair" and node.branch.secondary_target.strip():
+        if not _is_jump_target(node.branch.secondary_target, jump_marks):
+            issues.append(
+                ValidationIssue(
+                    severity=ValidationSeverity.WARNING,
+                    flow_name=flow.filename,
+                    node_id=node.node_id,
+                    message=f"分支次跳转目标可能不存在: {node.branch.secondary_target}",
+                )
+            )
+    return issues
 
-        if node.operation in {OperationType.PIC.value, OperationType.OCR.value}:
-            if not node.search_target.strip():
-                issues.append(_issue(flow, node, "识别节点需要图片或 OCR 目标"))
-            if node.region_text and not _is_region(node.region_text):
-                issues.append(_issue(flow, node, "识别区域必须为 x;y;w;h"))
-            if node.confidence_text:
-                if not _is_float(node.confidence_text):
-                    issues.append(_issue(flow, node, "置信度必须是数字"))
-                else:
-                    confidence = float(node.confidence_text)
-                    if confidence < 0 or confidence > 1:
-                        issues.append(_issue(flow, node, "置信度必须在 0 到 1 之间"))
-            if node.retry_value and not _is_float(node.retry_value):
-                issues.append(_issue(flow, node, "重试时间必须是数字"))
-            if node.retry_random and not _is_float(node.retry_random):
-                issues.append(_issue(flow, node, "重试随机时间必须是数字"))
-            if node.operation == OperationType.PIC.value and node.search_target.strip():
-                asset_path = root_path / node.search_target.strip()
-                if not asset_path.exists():
-                    issues.append(
-                        ValidationIssue(
-                            severity=ValidationSeverity.WARNING,
-                            flow_name=flow.filename,
-                            node_id=node.node_id,
-                            message=f"图片素材不存在: {node.search_target}",
-                        )
-                    )
-            if node.branch.is_enabled and not node.branch.primary_target.strip():
-                issues.append(_issue(flow, node, "分支目标不能为空"))
-            if node.branch.mode.value == "subflow" and node.branch.primary_target.strip():
-                subflow_path = root_path / node.branch.primary_target.strip()
-                if not subflow_path.exists():
-                    issues.append(
-                        ValidationIssue(
-                            severity=ValidationSeverity.WARNING,
-                            flow_name=flow.filename,
-                            node_id=node.node_id,
-                            message=f"子流程文件不存在: {node.branch.primary_target}",
-                        )
-                    )
-                elif is_resource_flow_filename(node.branch.primary_target.strip()):
-                    issues.append(_issue(flow, node, "资源文件不能作为子流程执行"))
-            if node.branch.mode.value == "jump_pair" and node.branch.primary_target.strip():
-                if not _is_jump_target(node.branch.primary_target, jump_marks):
-                    issues.append(
-                        ValidationIssue(
-                            severity=ValidationSeverity.WARNING,
-                            flow_name=flow.filename,
-                            node_id=node.node_id,
-                            message=f"分支主跳转目标可能不存在: {node.branch.primary_target}",
-                        )
-                    )
-            if node.branch.mode.value == "jump_pair" and not node.branch.secondary_target.strip():
-                issues.append(_issue(flow, node, "双跳转分支需要第二目标"))
-            if node.branch.mode.value == "jump_pair" and node.branch.secondary_target.strip():
-                if not _is_jump_target(node.branch.secondary_target, jump_marks):
-                    issues.append(
-                        ValidationIssue(
-                            severity=ValidationSeverity.WARNING,
-                            flow_name=flow.filename,
-                            node_id=node.node_id,
-                            message=f"分支次跳转目标可能不存在: {node.branch.secondary_target}",
-                        )
-                    )
 
-        if node.wait_value and not _is_float(node.wait_value):
-            issues.append(_issue(flow, node, "等待时间必须是数字"))
-        if node.wait_random and not _is_float(node.wait_random):
-            issues.append(_issue(flow, node, "等待随机时间必须是数字"))
-        if node.move_time and not _is_float(node.move_time):
-            issues.append(_issue(flow, node, "移动用时必须是数字"))
-
+def validate_node_timing_fields(
+    flow: FlowDocument,
+    node: OperationNode,
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if node.wait_value and not _is_float(node.wait_value):
+        issues.append(_issue(flow, node, "等待时间必须是数字"))
+    if node.wait_random and not _is_float(node.wait_random):
+        issues.append(_issue(flow, node, "等待随机时间必须是数字"))
+    if node.move_time and not _is_float(node.move_time):
+        issues.append(_issue(flow, node, "移动用时必须是数字"))
     return issues
 
 
@@ -171,7 +348,7 @@ def _validate_script_node(
         return issues
 
     script_filename, explicit_resource = parsed
-    if not _is_safe_relative_path(script_filename):
+    if not _is_safe_relative_path(root_path, script_filename):
         issues.append(_issue(flow, node, "script 文件必须位于当前配置目录内"))
     if not script_filename.lower().endswith(".py"):
         issues.append(_issue(flow, node, "script 文件必须以 .py 结尾"))
@@ -188,7 +365,7 @@ def _validate_script_node(
     if explicit_resource is None:
         return issues
 
-    if not _is_safe_relative_path(explicit_resource):
+    if not _is_safe_relative_path(root_path, explicit_resource):
         issues.append(_issue(flow, node, "显式资源文件必须位于当前配置目录内"))
 
     if not is_resource_flow_filename(explicit_resource):
@@ -210,7 +387,8 @@ def _validate_resource_node(
     root_path: Path,
     flow: FlowDocument,
     node: OperationNode,
-    seen_resource_aliases: set[str],
+    *,
+    duplicate_alias: bool,
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     parsed = parse_resource_param(node.param_text.strip())
@@ -219,9 +397,8 @@ def _validate_resource_node(
         return issues
 
     kind, alias = parsed
-    if alias in seen_resource_aliases:
+    if duplicate_alias:
         issues.append(_issue(flow, node, f"资源变量名重复: {alias}"))
-    seen_resource_aliases.add(alias)
 
     if kind in {"pic", "ocr"}:
         if not node.search_target.strip():
@@ -307,8 +484,11 @@ def _is_jump_target(text: str, jump_marks: set[str]) -> bool:
         return False
 
 
-def _is_safe_relative_path(text: str) -> bool:
-    path = Path(text.strip())
-    if not text.strip() or path.is_absolute():
+def _is_safe_relative_path(root_path: Path, text: str) -> bool:
+    if not text.strip():
         return False
-    return ".." not in path.parts
+    try:
+        resolve_config_relative_path(root_path, text)
+    except ValueError:
+        return False
+    return True

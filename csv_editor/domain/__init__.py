@@ -1,4 +1,4 @@
-from .enums import BranchMode, BranchTrigger, OperationType, ValidationSeverity
+from .enums import BranchMode, BranchTrigger, ValidationSeverity
 from .models import (
     BranchConfig,
     EditorDocument,
@@ -16,7 +16,6 @@ __all__ = [
     "EditorState",
     "FlowDocument",
     "OperationNode",
-    "OperationType",
     "ValidationIssue",
     "ValidationSeverity",
 ]

@@ -5,7 +5,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image
-from autogui import ocr as runtime_ocr
+from autogui.vision import ocr as runtime_ocr
 
 class RuntimeOcrPreviewAdapter:
     """Thin adapter for editor-side OCR preview reuse."""

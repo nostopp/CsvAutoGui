@@ -1,5 +1,5 @@
-from .execution_watchdog import ExecutionWatchdog
-from .baseInput import BaseInput
+from ..execution.watchdog import ExecutionWatchdog
+from .base import BaseInput
 
 
 class ObservedInput(BaseInput):

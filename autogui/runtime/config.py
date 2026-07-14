@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config_paths import normalize_config_dir, normalize_config_root
+from ..infrastructure.paths import normalize_config_dir, normalize_config_root
 
 
 DEFAULT_STALL_TIMEOUT_SECONDS = 90.0
@@ -73,10 +73,6 @@ class RuntimeConfigResolver:
     def config_root(self) -> Path:
         return self._config_root
 
-    @staticmethod
-    def _resolve_config_root(config_root: str | Path | None) -> Path:
-        return normalize_config_root(config_root)
-
     def _get_runtime_json_paths(self) -> list[Path]:
         runtime_paths: list[Path] = []
         current = self._config_dir
@@ -137,7 +133,7 @@ class RuntimeConfigResolver:
         watchdog = self._get_watchdog_section()
         nested = watchdog.get("recovery_watchdog")
         if nested is None:
-            return self._get_section("recovery_watchdog")
+            return {}
         if not isinstance(nested, dict):
             raise ValueError("runtime.json 中 watchdog.recovery_watchdog 必须是对象")
         return nested

@@ -1,4 +1,4 @@
-from autogui.script_runtime import ScriptBase
+from autogui.scripting.runtime import ScriptBase
 
 
 class ExampleScript(ScriptBase):

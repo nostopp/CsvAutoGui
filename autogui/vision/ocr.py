@@ -1,6 +1,4 @@
 import threading
-import pyautogui
-import cv2
 import numpy as np
 import time
 import re
@@ -8,8 +6,8 @@ import sys
 import os
 import traceback
 from pathlib import Path
-from .baseInput import BaseInput
-from . import log
+from ..infrastructure import log
+from ..input.base import BaseInput
 
 SAVE_OCR_FILE = False
 OCR_FILE_PATH = None
@@ -25,7 +23,7 @@ def shouldLog():
 def _runtime_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def _ocr_cache_dir() -> Path:

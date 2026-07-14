@@ -5,9 +5,9 @@ from typing import Any
 
 from serverchan_sdk import sc_send
 
-from . import log
+from ..infrastructure import log
+from ..runtime.config import NotificationRouteSettings, NotificationSettings
 from . import notifier
-from .runtime_config import NotificationRouteSettings, NotificationSettings
 
 
 _thread_local = threading.local()

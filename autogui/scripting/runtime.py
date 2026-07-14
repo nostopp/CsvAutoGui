@@ -9,47 +9,29 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pyautogui
+from operation_contracts import OperationType, require_operation_contract
 
-from . import log
-from .baseInput import BaseInput
-from .config_paths import logical_abs_path
-from .ocr import OCR
-from .resource_loader import ResourceSpec, load_resource_file
-from .scaleHelper import ScaleHelper
+from ..infrastructure import log
+from ..infrastructure.paths import resolve_config_relative_path
+from ..runtime.context import RuntimeContext
+from ..vision.ocr import OCR
+from .resources import ResourceSpec
 
 
 _script_cache: dict[str, ModuleType] = {}
 OperationDict = dict[str, Any]
 JumpResolver = Callable[[int | str], int]
 SubflowStarter = Callable[[str], None]
+PIC_DEFAULT_CONFIDENCE = require_operation_contract(OperationType.PIC).default_confidence
+OCR_DEFAULT_CONFIDENCE = require_operation_contract(OperationType.OCR).default_confidence
 
 
 def clear_script_cache() -> None:
     _script_cache.clear()
 
 
-def _resolve_relative_path(config_dir: str, relative_path: str) -> Path:
-    path = Path(relative_path)
-    if path.is_absolute():
-        raise ValueError(f"只支持相对配置目录的路径: {relative_path}")
-
-    base_dir = logical_abs_path(config_dir)
-    resolved_path = logical_abs_path(path, base_dir)
-    try:
-        resolved_path.relative_to(base_dir)
-    except ValueError as exc:
-        raise ValueError(f"路径超出配置目录: {relative_path}") from exc
-    try:
-        resolved_path.resolve().relative_to(base_dir.resolve())
-    except ValueError as exc:
-        raise ValueError(f"路径超出配置目录: {relative_path}") from exc
-    return resolved_path
-
-
 def _parse_script_target(operate_param: object) -> tuple[str, str | None, bool]:
-    if isinstance(operate_param, str):
-        parts = tuple(part.strip() for part in operate_param.split(";"))
-    elif isinstance(operate_param, tuple):
+    if isinstance(operate_param, tuple):
         parts = tuple(str(part).strip() for part in operate_param)
     else:
         parts = ()
@@ -95,32 +77,29 @@ def _load_script_module(script_path: Path) -> ModuleType:
 class ScriptContext:
     def __init__(
         self,
-        config_dir: str,
+        runtime_context: RuntimeContext,
         node: OperationDict,
-        input_obj: BaseInput,
-        scale_helper: ScaleHelper,
         resources: dict[str, ResourceSpec],
-        state: dict[str, Any],
         jump_resolver: JumpResolver,
         subflow_starter: SubflowStarter,
     ) -> None:
-        self.config_dir = config_dir
+        self.config_dir = os.fspath(runtime_context.config_dir)
         self.node = node
-        self.input = input_obj
-        self.scale_helper = scale_helper
+        self.input = runtime_context.input
+        self.scale_helper = runtime_context.scale_helper
         self.log = log
-        self.state = state
+        self.state = runtime_context.state
         self.resources = resources
         self._jump_resolver = jump_resolver
         self._subflow_starter = subflow_starter
-        self._config_dir_path = logical_abs_path(config_dir)
-        self._image_cache: dict[str, Any] = {}
+        self._runtime_context = runtime_context
+        self._config_dir_path = runtime_context.config_dir
 
     def _report_observation(self, detail: str) -> None:
         self.input.record_observation(detail, source="script_ctx")
 
     def resolve_path(self, path: str) -> Path:
-        return _resolve_relative_path(self.config_dir, path)
+        return resolve_config_relative_path(self.config_dir, path)
 
     def get_resource(self, name: str) -> ResourceSpec:
         if name not in self.resources:
@@ -141,11 +120,7 @@ class ScriptContext:
         self._subflow_starter(relative_path)
 
     def _load_image(self, name: str):
-        resolved_path = self.resolve_path(name)
-        cache_key = os.fspath(resolved_path)
-        if cache_key not in self._image_cache:
-            self._image_cache[cache_key] = self.scale_helper.getScaleImg(resolved_path)
-        return self._image_cache[cache_key]
+        return self._runtime_context.get_image(name)
 
     def find_image(self, resource: str | None = None, name: str | None = None, region=None, confidence: float | None = None, grayscale=None):
         self._report_observation("find_image")
@@ -158,7 +133,7 @@ class ScriptContext:
             raise ValueError("find_image 需要 resource 或 name")
 
         search_region = region if region is not None else None if resource_spec is None else resource_spec.region
-        search_confidence = confidence if confidence is not None else 0.8 if resource_spec is None or resource_spec.confidence is None else resource_spec.confidence
+        search_confidence = confidence if confidence is not None else PIC_DEFAULT_CONFIDENCE if resource_spec is None or resource_spec.confidence is None else resource_spec.confidence
         search_grayscale = grayscale if grayscale is not None else False if resource_spec is not None and resource_spec.disable_grayscale else None
         image = self._load_image(search_name)
 
@@ -196,7 +171,7 @@ class ScriptContext:
             raise ValueError("find_text 需要 resource 或 text")
 
         search_region = region if region is not None else None if resource_spec is None else resource_spec.region
-        search_confidence = confidence if confidence is not None else 0.9 if resource_spec is None or resource_spec.confidence is None else resource_spec.confidence
+        search_confidence = confidence if confidence is not None else OCR_DEFAULT_CONFIDENCE if resource_spec is None or resource_spec.confidence is None else resource_spec.confidence
         x_center, y_center, width, height = OCR(search_text, self.input, search_region, search_confidence)
         if x_center is None or y_center is None:
             return None
@@ -223,7 +198,7 @@ class ScriptContext:
         ]
 
     def sleep(self, seconds: float) -> None:
-        # self._report_observation("sleep")
+        self._report_observation("sleep")
         time.sleep(seconds)
 
 
@@ -248,31 +223,24 @@ class ScriptBase:
 
 def execute_script_node(
     operation: OperationDict,
-    config_dir: str,
-    input_obj: BaseInput,
-    scale_helper: ScaleHelper,
-    state: dict[str, Any],
+    runtime_context: RuntimeContext,
     jump_resolver: JumpResolver,
     subflow_starter: SubflowStarter,
-    print_log: bool = False,
 ):
     script_name, resource_name, explicit_resource = _parse_script_target(operation.get("operate_param"))
-    script_path = _resolve_relative_path(config_dir, script_name)
+    script_path = resolve_config_relative_path(runtime_context.config_dir, script_name)
 
     try:
         module = _load_script_module(script_path)
-        resources = load_resource_file(config_dir, scale_helper, resource_name, explicit_resource)
+        resources = runtime_context.get_resources(resource_name, explicit_resource)
         ctx = ScriptContext(
-            config_dir,
+            runtime_context,
             operation,
-            input_obj,
-            scale_helper,
             resources,
-            state,
             jump_resolver,
             subflow_starter,
         )
-        if print_log:
+        if runtime_context.print_log:
             resource_text = resource_name if resources or explicit_resource else "无"
             log.debug(f"执行脚本 {script_name}, 资源文件: {resource_text}")
 

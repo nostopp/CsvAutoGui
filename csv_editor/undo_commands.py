@@ -1,32 +1,79 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtGui import QUndoCommand
 
-from csv_editor.domain.models import FlowDocument, OperationNode
+from csv_editor.controllers.change_set import EditorChangeSet
+from csv_editor.controllers.document_controller import EditorDocumentController
+from csv_editor.domain.models import OperationNode
+from csv_editor.domain.node_patch import NodePatch
 
 
-class RefreshAwareCommand(QUndoCommand):
-    def __init__(self, window, text: str) -> None:
+ChangeCallback = Callable[[EditorChangeSet], None]
+
+
+class ControllerCommand(QUndoCommand):
+    def __init__(
+        self,
+        controller: EditorDocumentController,
+        *,
+        on_change: ChangeCallback | None,
+        text: str,
+    ) -> None:
         super().__init__(text)
-        self.window = window
+        self.controller = controller
+        self._on_change = on_change
 
-    def _refresh(self, selected_node_id: str | None = None) -> None:
-        if selected_node_id is not None:
-            self.window.current_node_id = selected_node_id
-        self.window._refresh_validation()
-        self.window._refresh_node_table()
-        self.window._refresh_preview()
+    def _publish(self, change_set: EditorChangeSet) -> None:
+        if self._on_change is not None:
+            self._on_change(change_set)
 
 
-class UpdateNodeCommand(RefreshAwareCommand):
+class UpdateNodeCommand(ControllerCommand):
     COMMAND_ID = 1001
 
-    def __init__(self, window, flow_name: str, before: OperationNode, after: OperationNode, text: str = "编辑节点") -> None:
-        super().__init__(window, text)
+    def __init__(
+        self,
+        controller: EditorDocumentController,
+        flow_name: str,
+        before: OperationNode,
+        after: OperationNode,
+        changed_fields: frozenset[str],
+        *,
+        on_change: ChangeCallback | None = None,
+        text: str = "编辑节点",
+    ) -> None:
+        super().__init__(controller, on_change=on_change, text=text)
         self.flow_name = flow_name
         self.node_id = before.node_id
         self.before = before.clone()
         self.after = after.clone()
+        self.changed_fields = frozenset(changed_fields)
+
+    @classmethod
+    def from_patch(
+        cls,
+        controller: EditorDocumentController,
+        flow_name: str,
+        patch: NodePatch,
+        *,
+        on_change: ChangeCallback | None = None,
+        text: str = "编辑节点",
+    ) -> "UpdateNodeCommand | None":
+        prepared = controller.prepare_node_patch(flow_name, patch)
+        if prepared is None:
+            return None
+        before, after, changed_fields = prepared
+        return cls(
+            controller,
+            flow_name,
+            before,
+            after,
+            changed_fields,
+            on_change=on_change,
+            text=text,
+        )
 
     def id(self) -> int:
         return self.COMMAND_ID
@@ -34,117 +81,135 @@ class UpdateNodeCommand(RefreshAwareCommand):
     def mergeWith(self, other) -> bool:
         if not isinstance(other, UpdateNodeCommand):
             return False
+        if self.controller is not other.controller:
+            return False
         if self.flow_name != other.flow_name or self.node_id != other.node_id:
             return False
         self.after = other.after.clone()
+        self.changed_fields = self.changed_fields | other.changed_fields
         return True
 
     def undo(self) -> None:
-        node = self._resolve_node()
-        if node is None:
-            return
-        node.apply_from(self.before)
-        self._refresh(self.node_id)
+        self._publish(
+            self.controller.apply_node_state(
+                self.flow_name,
+                self.before,
+                self.changed_fields,
+            )
+        )
 
     def redo(self) -> None:
-        node = self._resolve_node()
-        if node is None:
-            return
-        node.apply_from(self.after)
-        self._refresh(self.node_id)
-
-    def _resolve_node(self) -> OperationNode | None:
-        flow = self._resolve_flow()
-        if flow is None:
-            return None
-        return flow.get_node(self.node_id)
-
-    def _resolve_flow(self) -> FlowDocument | None:
-        return self.window.document.get_flow(self.flow_name) if self.window.document else None
+        self._publish(
+            self.controller.apply_node_state(
+                self.flow_name,
+                self.after,
+                self.changed_fields,
+            )
+        )
 
 
-class InsertNodeCommand(RefreshAwareCommand):
-    def __init__(self, window, flow_name: str, node: OperationNode, index: int, text: str = "新增节点") -> None:
-        super().__init__(window, text)
+class InsertNodeCommand(ControllerCommand):
+    def __init__(
+        self,
+        controller: EditorDocumentController,
+        flow_name: str,
+        node: OperationNode,
+        index: int,
+        *,
+        on_change: ChangeCallback | None = None,
+        text: str = "新增节点",
+    ) -> None:
+        super().__init__(controller, on_change=on_change, text=text)
         self.flow_name = flow_name
         self.node = node.clone()
         self.index = index
 
     def undo(self) -> None:
-        flow = self._resolve_flow()
-        if flow is None:
-            return
-        flow.nodes = [item for item in flow.nodes if item.node_id != self.node.node_id]
-        flow.reindex()
-        next_node_id = flow.nodes[min(self.index - 1, len(flow.nodes) - 1)].node_id if flow.nodes else None
-        self._refresh(next_node_id)
+        self._publish(
+            self.controller.delete_node(
+                self.flow_name,
+                self.node.node_id,
+                preferred_selection_index=self.index - 1,
+            )
+        )
 
     def redo(self) -> None:
-        flow = self._resolve_flow()
-        if flow is None:
-            return
-        if flow.get_node(self.node.node_id) is None:
-            flow.nodes.insert(min(self.index, len(flow.nodes)), self.node.clone())
-        flow.reindex()
-        self._refresh(self.node.node_id)
-
-    def _resolve_flow(self) -> FlowDocument | None:
-        return self.window.document.get_flow(self.flow_name) if self.window.document else None
+        self._publish(
+            self.controller.insert_node(
+                self.flow_name,
+                self.node,
+                self.index,
+            )
+        )
 
 
-class DeleteNodeCommand(RefreshAwareCommand):
-    def __init__(self, window, flow_name: str, node: OperationNode, index: int, text: str = "删除节点") -> None:
-        super().__init__(window, text)
+class DeleteNodeCommand(ControllerCommand):
+    def __init__(
+        self,
+        controller: EditorDocumentController,
+        flow_name: str,
+        node: OperationNode,
+        index: int,
+        *,
+        on_change: ChangeCallback | None = None,
+        text: str = "删除节点",
+    ) -> None:
+        super().__init__(controller, on_change=on_change, text=text)
         self.flow_name = flow_name
         self.node = node.clone()
         self.index = index
 
     def undo(self) -> None:
-        flow = self._resolve_flow()
-        if flow is None:
-            return
-        if flow.get_node(self.node.node_id) is None:
-            flow.nodes.insert(min(self.index, len(flow.nodes)), self.node.clone())
-        flow.reindex()
-        self._refresh(self.node.node_id)
+        self._publish(
+            self.controller.insert_node(
+                self.flow_name,
+                self.node,
+                self.index,
+            )
+        )
 
     def redo(self) -> None:
-        flow = self._resolve_flow()
-        if flow is None:
-            return
-        flow.nodes = [item for item in flow.nodes if item.node_id != self.node.node_id]
-        flow.reindex()
-        next_node_id = flow.nodes[min(self.index, len(flow.nodes) - 1)].node_id if flow.nodes else None
-        self._refresh(next_node_id)
-
-    def _resolve_flow(self) -> FlowDocument | None:
-        return self.window.document.get_flow(self.flow_name) if self.window.document else None
+        self._publish(
+            self.controller.delete_node(
+                self.flow_name,
+                self.node.node_id,
+                preferred_selection_index=self.index,
+            )
+        )
 
 
-class MoveNodeCommand(RefreshAwareCommand):
-    def __init__(self, window, flow_name: str, node_id: str, from_index: int, to_index: int, text: str) -> None:
-        super().__init__(window, text)
+class MoveNodeCommand(ControllerCommand):
+    def __init__(
+        self,
+        controller: EditorDocumentController,
+        flow_name: str,
+        node_id: str,
+        from_index: int,
+        to_index: int,
+        *,
+        on_change: ChangeCallback | None = None,
+        text: str,
+    ) -> None:
+        super().__init__(controller, on_change=on_change, text=text)
         self.flow_name = flow_name
         self.node_id = node_id
         self.from_index = from_index
         self.to_index = to_index
 
     def undo(self) -> None:
-        self._move(self.to_index, self.from_index)
+        self._publish(
+            self.controller.move_node(
+                self.flow_name,
+                self.node_id,
+                self.from_index,
+            )
+        )
 
     def redo(self) -> None:
-        self._move(self.from_index, self.to_index)
-
-    def _move(self, old_index: int, new_index: int) -> None:
-        flow = self._resolve_flow()
-        if flow is None:
-            return
-        if old_index < 0 or old_index >= len(flow.nodes) or new_index < 0 or new_index >= len(flow.nodes):
-            return
-        node = flow.nodes.pop(old_index)
-        flow.nodes.insert(new_index, node)
-        flow.reindex()
-        self._refresh(self.node_id)
-
-    def _resolve_flow(self) -> FlowDocument | None:
-        return self.window.document.get_flow(self.flow_name) if self.window.document else None
+        self._publish(
+            self.controller.move_node(
+                self.flow_name,
+                self.node_id,
+                self.to_index,
+            )
+        )

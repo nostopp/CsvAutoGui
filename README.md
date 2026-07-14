@@ -24,7 +24,7 @@
    ```powershell
    uv run python -m csv_editor
    ```
-5. 修改 CSV、`script` 脚本或 `*_resource.csv` 后，需要手动执行界面里的“重新加载”来刷新配置缓存。
+5. 修改普通 CSV、`recovery.csv`、`runtime.json`、`script` 脚本或 `*_resource.csv` 后，需要手动执行界面里的“重新加载”；CLI 方式则需结束并重新启动实例。
 
 ### 可选的全局恢复机制
 
@@ -120,7 +120,6 @@
 | -l / --loop | 自动化是否循环 | False |
 | --log | 是否打印日志 | False |
 | -s / --screenshots | 运行在截图模式 | False |
-| --record | 运行在记录操作模式 | False |
 | --scale | 运行分辨率与配置分辨率的比值 | 1 |
 | --scale_image | 缩放时是否缩放用到的截图 | False |
 | --offset | 运行时对涉及到的绝对坐标进行偏移 | 0;0 |
@@ -141,10 +140,15 @@
 
 ---
 
-## 记录操作模式
+## CSV Editor 录制模式
 
-- 按下 `Shift+X`：开始记录操作
-- 再次按下 `Shift+X`：停止记录操作,并将操作保存在record目录
+- 录制入口只在 CSV Editor 的“工具 -> 录制模式…”中。
+- 先打开目标配置和 flow，再选择坐标模式：
+  - “屏幕绝对坐标（FrontInput）”直接记录屏幕坐标。
+  - “窗口内坐标（BackInput）”需要选择目标窗口；可选“开启子窗口匹配”，把坐标转换为命中子窗口内的位置。
+- 点击“开始录制”后编辑器会最小化并显示悬浮录制条。录制条可暂停/继续、停止，也可添加 OCR/PIC 的“等待出现”“等待消失”“定位目标”标记；`Shift+X` 是备用停止热键。
+- PIC 标记会把框选图片保存到当前配置目录；OCR 标记会使用本地 OCR 预览生成候选文本。定位标记后的鼠标动作会尽量转成目标内点击或相对偏移，减少对绝对坐标的依赖。
+- 录制结束只生成草稿节点，不会直接写 CSV。请先在审查表检查语义，再“复制选中”或“复制全部”，回到目标 flow 粘贴并保存；离散多选也可以复制。
 
 ---
 
@@ -203,9 +207,12 @@
   - `resource` + `ocr;meter_text`：通过同样的列声明一个 OCR 资源
   - `resource` + `jmp;finish`：通过 `跳转标记` 列声明脚本内部别名到真实跳转目标的映射，真实目标可以是标记名或序号
 - 编辑器中打开 `*_resource.csv` 时，只能新增 `resource` 节点；`resource(pic;alias)` 和 `resource(ocr;alias)` 仍然可以继续使用截图回填和 OCR 区域采集能力。
-- 当前版本不会自动检测脚本或资源文件变更。修改 `.py`、`*.csv`、`*_resource.csv` 后，都需要手动点击“重新加载”。
-- 这次手动重载的含义是“重载配置”：会一起刷新 CSV 解析缓存、脚本缓存和资源文件缓存。
+- 当前版本不会自动检测配置变更。修改 `.py`、普通 `*.csv`、`recovery.csv`、`runtime.json` 或 `*_resource.csv` 后，都需要手动点击“重新加载”；CLI 实例需重新启动。
+- 这次手动重载的含义是“重载配置”：会统一刷新 CSV 解析缓存、脚本缓存和资源文件缓存。
+- CSV 的进程级缓存只保存未缩放、不可变的 RawFlow；缩放后的 CompiledFlow、图片和资源缓存都由每个运行实例自己的 `RuntimeContext` 持有，不会在多实例之间共享坐标、状态或图片对象。
 - 当配置启用了 `recovery.csv` 时，脚本里的 `ctx.input` 会自动计入 watchdog 的“有效操作”；`ctx.find_image`、`ctx.find_text`、`ctx.sleep` 会计入“非有效操作”。
+
+操作名称、类别、参数类型、flow 允许范围、字段支持和 PIC/OCR 默认置信度统一定义在根模块 `operation_contracts.py`。运行时 flow compiler 与执行默认值、编辑器 codec/validation/summary/recording/Inspector 都消费同一份 contract；使用方统一从 `operation_contracts` 导入 `OperationType`，编辑器领域层不再重导出该枚举。
 
 ### Script 编写建议
 
@@ -213,7 +220,7 @@
 - 推荐写法：
 
 ```python
-from autogui.script_runtime import ScriptBase
+from autogui.scripting.runtime import ScriptBase
 
 
 class ExampleScript(ScriptBase):

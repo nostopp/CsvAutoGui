@@ -6,18 +6,6 @@ def _beep_windows():
     winsound.MessageBeep(winsound.MB_ICONHAND)
 
 def _show_tk_popup(text: str, width: int = 210, height: int = 120):
-    root = getattr(tk, "_default_root", None)
-    #有现成窗口
-    if root is not None:
-        def _create_on_root():
-            win = tk.Toplevel(root)
-            _init_popup_window(win, text, width, height)
-        try:
-            root.after(0, _create_on_root)
-            return
-        except Exception:
-            pass
-
     root = tk.Tk()
     root.withdraw()
     win = tk.Toplevel(root)

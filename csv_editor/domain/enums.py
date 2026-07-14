@@ -3,24 +3,6 @@ from __future__ import annotations
 from enum import StrEnum
 
 
-class OperationType(StrEnum):
-    CLICK = "click"
-    MOUSE_DOWN = "mDown"
-    MOUSE_UP = "mUp"
-    MOVE_REL = "mMove"
-    MOVE_TO = "mMoveTo"
-    PRESS = "press"
-    KEY_DOWN = "kDown"
-    KEY_UP = "kUp"
-    WRITE = "write"
-    PIC = "pic"
-    OCR = "ocr"
-    SCRIPT = "script"
-    RESOURCE = "resource"
-    NOTIFY = "notify"
-    JUMP = "jmp"
-
-
 class BranchMode(StrEnum):
     NONE = "none"
     SUBFLOW = "subflow"

@@ -2,7 +2,7 @@
 轻量日志模块，用于在命令行（默认 print）和 GUI（回调）之间切换。
 
 用法：
-  from autogui import log
+  from autogui.infrastructure import log
   log.info('message')
 
 API:

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Iterable
 from uuid import uuid4
 
-from .enums import BranchMode, BranchTrigger, OperationType, ValidationSeverity
+from .enums import BranchMode, BranchTrigger, ValidationSeverity
 
 
 @dataclass(slots=True)
@@ -48,13 +48,6 @@ class OperationNode:
     note: str = ""
     branch: BranchConfig = field(default_factory=BranchConfig)
     raw_extra: dict[str, str] = field(default_factory=dict)
-
-    @property
-    def operation_type(self) -> OperationType | None:
-        try:
-            return OperationType(self.operation)
-        except ValueError:
-            return None
 
     def clone(self) -> "OperationNode":
         return OperationNode(

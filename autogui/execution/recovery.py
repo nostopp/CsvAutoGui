@@ -1,24 +1,28 @@
 import datetime
 import traceback
 import ctypes
+import os
 from dataclasses import dataclass
 from pathlib import Path
 import re
 from threading import Event
-from typing import Any
 
 import pyautogui
 import win32con
 
-from . import log
-from .autoOperator import AutoOperator
-from .baseInput import BaseInput
-from .execution_watchdog import ExecutionWatchdog
-from .notification_runtime import NotificationRequest, dispatch_notification
-from .observed_input import ObservedInput
-from .parser import GetCsv
-from .runtime_config import RuntimeConfigResolver, WatchdogSettings, WatchdogThresholds
-from .scaleHelper import ScaleHelper
+from ..infrastructure import log
+from ..input.base import BaseInput
+from ..input.observed import ObservedInput
+from ..notifications.runtime import NotificationRequest, dispatch_notification
+from ..runtime.config import RuntimeConfigResolver, WatchdogSettings, WatchdogThresholds
+from ..runtime.context import RuntimeContext
+from .session import (
+    FlowRuntimeSession,
+    SessionRunResult,
+    SessionStatus,
+    StepInfo,
+)
+from .watchdog import ExecutionWatchdog
 
 
 NON_PROGRESS_OPERATIONS = {"mMove", "mMoveTo", "pic", "ocr", "jmp", "notify", "script"}
@@ -27,81 +31,10 @@ _FILENAME_SANITIZE_PATTERN = re.compile(r'[<>:"/\\|?*\s]+')
 
 
 @dataclass(frozen=True)
-class StepInfo:
-    flow_name: str
-    index: int
-    operate: str
-
-
-@dataclass(frozen=True)
-class SessionRunResult:
-    status: str
-    step: StepInfo | None = None
-
-
-@dataclass(frozen=True)
 class RecoveryRunResult:
     resolution: str
     detail: str
     unresolved_reason: str | None = None
-
-
-class FlowRuntimeSession:
-    def __init__(
-        self,
-        config_dir: str,
-        source_file: str,
-        input_obj: BaseInput,
-        scale_helper: ScaleHelper,
-        loop: bool,
-        print_log: bool,
-        shared_state: dict[str, Any] | None = None,
-    ) -> None:
-        shared_state = {} if shared_state is None else shared_state
-        self.sub_operator_list: list[AutoOperator] = []
-        self.main_operator = AutoOperator(
-            GetCsv(config_dir, scale_helper, source_file),
-            config_dir,
-            self.sub_operator_list,
-            input_obj,
-            scale_helper,
-            loop,
-            print_log,
-            shared_state,
-            sourceFile=source_file,
-        )
-        self.main_finished = False
-
-    def get_active_operator(self) -> AutoOperator | None:
-        if self.sub_operator_list:
-            return self.sub_operator_list[-1]
-        if self.main_finished:
-            return None
-        return self.main_operator
-
-    def peek_current_step(self) -> StepInfo | None:
-        operator = self.get_active_operator()
-        if operator is None:
-            return None
-        operation = operator.peek_current_operation()
-        return StepInfo(operator.source_file, operation["index"], operation["operate"])
-
-    def step(self) -> bool:
-        if self.sub_operator_list:
-            idx = len(self.sub_operator_list) - 1
-            sub_operator = self.sub_operator_list[idx]
-            if not sub_operator.Update():
-                self.sub_operator_list.pop(idx)
-            return True
-
-        if self.main_finished:
-            return False
-
-        if not self.main_operator.Update():
-            self.main_finished = True
-            return False
-
-        return True
 
 
 def _run_session_until_boundary(
@@ -112,7 +45,7 @@ def _run_session_until_boundary(
     while not stop_event.is_set():
         step = session.peek_current_step()
         if step is None:
-            return SessionRunResult("finished", None)
+            return SessionRunResult(SessionStatus.FINISHED)
 
         watchdog.begin_step()
         has_more = session.step()
@@ -120,12 +53,15 @@ def _run_session_until_boundary(
             watchdog.record_observation(step.operate, source="node")
 
         if watchdog.should_recover():
-            return SessionRunResult("stalled", step)
+            return SessionRunResult(
+                SessionStatus.STALLED,
+                step,
+            )
 
         if not has_more and not session.sub_operator_list:
-            return SessionRunResult("finished", step)
+            return SessionRunResult(SessionStatus.FINISHED, step)
 
-    return SessionRunResult("stopped")
+    return SessionRunResult(SessionStatus.STOPPED)
 
 
 def _sanitize_filename_part(value: str) -> str:
@@ -155,11 +91,9 @@ def capture_stall_screenshot(config_dir: str, step: StepInfo | None) -> Path | N
 
 
 def create_main_session(
-    config_dir: str,
+    runtime_context: RuntimeContext,
     real_input: BaseInput,
-    scale_helper: ScaleHelper,
     loop: bool,
-    print_log: bool,
     watchdog_settings: WatchdogSettings,
 ) -> tuple[FlowRuntimeSession, ExecutionWatchdog]:
     watchdog = ExecutionWatchdog(
@@ -167,40 +101,39 @@ def create_main_session(
         watchdog_settings.stall_non_progress_ops,
     )
     observed_input = ObservedInput(real_input, watchdog)
+    runtime_context.set_input(observed_input)
     session = FlowRuntimeSession(
-        config_dir=config_dir,
+        runtime_context,
         source_file="main.csv",
-        input_obj=observed_input,
-        scale_helper=scale_helper,
         loop=loop,
-        print_log=print_log,
     )
     return session, watchdog
 
 
 def run_recovery_flow(
-    config_dir: str,
+    runtime_context: RuntimeContext,
     real_input: BaseInput,
-    scale_helper: ScaleHelper,
-    print_log: bool,
     runtime_resolver: RuntimeConfigResolver,
-    stop_event: Event,
 ) -> RecoveryRunResult:
+    stop_event = runtime_context.stop_event
+    if stop_event is None:
+        raise RuntimeError("RuntimeContext.stop_event 未初始化")
     thresholds: WatchdogThresholds = runtime_resolver.get_recovery_watchdog_thresholds()
     watchdog = ExecutionWatchdog(
         thresholds.stall_timeout_seconds,
         thresholds.stall_non_progress_ops,
     )
     observed_input = ObservedInput(real_input, watchdog)
-    session = FlowRuntimeSession(
-        config_dir=config_dir,
-        source_file="recovery.csv",
-        input_obj=observed_input,
-        scale_helper=scale_helper,
-        loop=False,
-        print_log=print_log,
-    )
+    previous_input = runtime_context.input
+    previous_state = runtime_context.state
+    runtime_context.state = {}
+    runtime_context.set_input(observed_input)
     try:
+        session = FlowRuntimeSession(
+            runtime_context,
+            source_file="recovery.csv",
+            loop=False,
+        )
         result = _run_session_until_boundary(session, watchdog, stop_event)
     except Exception:
         log.error(f"执行 recovery.csv 失败\n{traceback.format_exc()}")
@@ -209,9 +142,12 @@ def run_recovery_flow(
             detail="recovery.csv 抛出异常",
             unresolved_reason="recovery_failed",
         )
-    if result.status == "finished":
+    finally:
+        runtime_context.state = previous_state
+        runtime_context.set_input(previous_input)
+    if result.status == SessionStatus.FINISHED:
         return RecoveryRunResult("success", "recovery.csv 正常结束")
-    if result.status == "stalled":
+    if result.status == SessionStatus.STALLED:
         step = result.step
         return RecoveryRunResult(
             resolution="failed",
@@ -276,33 +212,32 @@ def _handle_unresolved_stall(
 
 
 def run_config_with_watchdog(
-    config_dir: str,
+    runtime_context: RuntimeContext,
     real_input: BaseInput,
-    scale_helper: ScaleHelper,
     loop: bool,
-    print_log: bool,
-    stop_event: Event,
-    runtime_resolver: RuntimeConfigResolver | None = None,
+    runtime_resolver: RuntimeConfigResolver,
 ) -> None:
-    resolver = runtime_resolver or RuntimeConfigResolver(config_dir)
+    config_dir = os.fspath(runtime_context.config_dir)
+    stop_event = runtime_context.stop_event
+    if stop_event is None:
+        raise RuntimeError("RuntimeContext.stop_event 未初始化")
+    resolver = runtime_resolver
     watchdog_settings = resolver.get_watchdog_settings()
     recovery_count = 0
     session, watchdog = create_main_session(
-        config_dir,
+        runtime_context,
         real_input,
-        scale_helper,
         loop,
-        print_log,
         watchdog_settings,
     )
 
     while not stop_event.is_set():
         result = _run_session_until_boundary(session, watchdog, stop_event)
-        if result.status == "finished":
+        if result.status == SessionStatus.FINISHED:
             return
-        if result.status == "stopped":
+        if result.status == SessionStatus.STOPPED:
             return
-        if result.status != "stalled":
+        if result.status != SessionStatus.STALLED:
             raise RuntimeError(f"未知运行结果: {result.status}")
 
         step = result.step
@@ -340,12 +275,9 @@ def run_config_with_watchdog(
 
         recovery_count += 1
         recovery_result = run_recovery_flow(
-            config_dir=config_dir,
+            runtime_context=runtime_context,
             real_input=real_input,
-            scale_helper=scale_helper,
-            print_log=print_log,
             runtime_resolver=resolver,
-            stop_event=stop_event,
         )
         if recovery_result.resolution == "stopped":
             return
@@ -361,11 +293,10 @@ def run_config_with_watchdog(
             return
 
         log.warning(f"恢复成功，第 {recovery_count} 次 recovery 完成，重新从 main.csv 开始: {recovery_result.detail}")
+        runtime_context.reset_business_state()
         session, watchdog = create_main_session(
-            config_dir,
+            runtime_context,
             real_input,
-            scale_helper,
             loop,
-            print_log,
             watchdog_settings,
         )

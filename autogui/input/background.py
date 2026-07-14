@@ -8,11 +8,10 @@ import ctypes
 import numpy as np
 import cv2
 import pyautogui
-import pyscreeze
 from pathlib import Path
-from . import log
-from .baseInput import BaseInput
-from .imageMatcher import locateCenterColorSensitiveOnImage
+from ..infrastructure import log
+from .base import BaseInput
+from .image_matcher import locateCenterColorSensitiveOnImage
 
 # https://docs.microsoft.com/zh/windows/win32/inputdev/virtual-key-codes
 # key的wparam就是vkcode

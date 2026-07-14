@@ -1,11 +1,22 @@
 from __future__ import annotations
 
-from csv_editor.domain.enums import BranchMode, OperationType
+from operation_contracts import (
+    OperationCategory,
+    OperationField,
+    OperationType,
+    get_operation_contract,
+)
+
+from csv_editor.domain.enums import BranchMode
 from csv_editor.domain.models import OperationNode
 
 
 def summarize_node(node: OperationNode) -> str:
     operation = node.operation
+    contract = get_operation_contract(operation)
+    if contract is not None and contract.category is OperationCategory.RECOGNITION:
+        label = "图片" if contract.operation is OperationType.PIC else "OCR"
+        return _summarize_detect(label, node)
     if operation == OperationType.CLICK.value:
         return f"点击鼠标 {node.param_text or 'left'}"
     if operation == OperationType.MOUSE_DOWN.value:
@@ -28,10 +39,6 @@ def summarize_node(node: OperationNode) -> str:
         return f"通知 {node.param_text or '(空)'}"
     if operation == OperationType.JUMP.value:
         return f"跳转到 {node.param_text or '(未设置)'}"
-    if operation == OperationType.PIC.value:
-        return _summarize_detect("图片", node)
-    if operation == OperationType.OCR.value:
-        return _summarize_detect("OCR", node)
     return f"未知操作 {operation or '(空)'}"
 
 
@@ -54,7 +61,8 @@ def summarize_node_timing(node: OperationNode) -> str:
     if node.wait_random.strip():
         parts.append(f"等待随机{node.wait_random.strip()}")
 
-    if node.operation in {OperationType.PIC.value, OperationType.OCR.value}:
+    contract = get_operation_contract(node.operation)
+    if contract is not None and OperationField.RETRY in contract.supported_fields:
         parts.append(f"重试时间{node.retry_value.strip() or '0'}")
         if node.retry_random.strip():
             parts.append(f"重试随机{node.retry_random.strip()}")

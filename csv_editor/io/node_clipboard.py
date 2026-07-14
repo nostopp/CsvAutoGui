@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from csv_editor.domain.enums import BranchMode, BranchTrigger, OperationType
+from operation_contracts import OperationType
+
+from csv_editor.domain.enums import BranchMode, BranchTrigger
 from csv_editor.domain.models import BranchConfig, FlowDocument, OperationNode
 
 CLIPBOARD_MIME_TYPE = "application/x-csvautogui-nodes"

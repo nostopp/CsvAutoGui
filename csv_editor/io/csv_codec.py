@@ -4,7 +4,9 @@ import csv
 import io
 from pathlib import Path
 
-from csv_editor.domain.enums import BranchMode, BranchTrigger, OperationType
+from operation_contracts import get_operation_contract
+
+from csv_editor.domain.enums import BranchMode, BranchTrigger
 from csv_editor.domain.models import BranchConfig, EditorDocument, FlowDocument, OperationNode
 from csv_schema import (
     COL_CONFIDENCE,
@@ -25,6 +27,11 @@ from csv_schema import (
 
 RESOURCE_FILE_SUFFIX = "_resource.csv"
 RESOURCE_PARAM_KINDS = {"pic", "ocr", "jmp"}
+
+
+def _supports_branch(operation: str) -> bool:
+    contract = get_operation_contract(operation)
+    return bool(contract and contract.supports_branch)
 
 
 def is_resource_flow_filename(filename: str) -> bool:
@@ -137,7 +144,7 @@ class CsvEditorCodec:
         }
 
     def _decode_branch(self, raw_param: str, operation: str) -> BranchConfig:
-        if operation not in {OperationType.PIC.value, OperationType.OCR.value} or not raw_param:
+        if not _supports_branch(operation) or not raw_param:
             return BranchConfig()
 
         parts = raw_param.split(";")
@@ -157,12 +164,12 @@ class CsvEditorCodec:
         return BranchConfig()
 
     def _decode_param_text(self, raw_param: str, operation: str, branch: BranchConfig) -> str:
-        if operation in {OperationType.PIC.value, OperationType.OCR.value} and branch.is_enabled:
+        if _supports_branch(operation) and branch.is_enabled:
             return ""
         return raw_param
 
     def _encode_param_text(self, node: OperationNode) -> str:
-        if node.operation in {OperationType.PIC.value, OperationType.OCR.value} and node.branch.is_enabled:
+        if _supports_branch(node.operation) and node.branch.is_enabled:
             if node.branch.mode is BranchMode.SUBFLOW:
                 return f"{node.branch.trigger.value};{node.branch.primary_target}"
             if node.branch.mode is BranchMode.JUMP_PAIR:

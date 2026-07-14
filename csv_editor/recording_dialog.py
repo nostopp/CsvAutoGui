@@ -24,8 +24,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from operation_contracts import OperationType
+
 from csv_editor.adapters.ocr_adapter import RuntimeOcrPreviewAdapter
-from csv_editor.domain.enums import BranchTrigger, OperationType
+from csv_editor.domain.enums import BranchTrigger
 from csv_editor.domain.models import OperationNode
 from csv_editor.io.assets import save_capture_image
 from csv_editor.io.node_clipboard import NodeClipboardPayload, build_clipboard_payload

@@ -1,24 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QMimeData, QRect, QSize, Qt
 from PySide6.QtGui import QAction, QBrush, QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QPainter, QPalette, QPixmap, QShortcut, QUndoStack
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
-    QComboBox,
     QFileDialog,
     QDialogButtonBox,
-    QFormLayout,
-    QGridLayout,
-    QGroupBox,
     QHeaderView,
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -27,25 +22,27 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QDialog,
-    QScrollArea,
-    QSizePolicy,
     QSplitter,
     QStyle,
     QStyleOptionViewItem,
     QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
-    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from autogui.config_paths import normalize_config_dir
+from autogui.infrastructure.paths import normalize_config_dir
+from autogui.runtime.cache import clear_runtime_caches
+from operation_contracts import OperationType, get_operation_contract, require_operation_contract
 from csv_editor.adapters import RuntimeOcrPreviewAdapter
-from csv_editor.domain.enums import BranchMode, BranchTrigger, OperationType, ValidationSeverity
-from csv_editor.domain.models import BranchConfig, EditorDocument, FlowDocument, OperationNode, ValidationIssue
+from csv_editor.controllers.change_set import ChangeImpact, EditorChangeSet
+from csv_editor.controllers.document_controller import EditorDocumentController
+from csv_editor.domain.enums import BranchMode, BranchTrigger, ValidationSeverity
+from csv_editor.domain.models import EditorDocument, FlowDocument, OperationNode, ValidationIssue
+from csv_editor.domain.node_patch import NodePatch
 from csv_editor.io.assets import save_capture_image
 from csv_editor.io.csv_codec import CsvEditorCodec, is_resource_flow_filename, parse_resource_param, parse_script_param
 from csv_editor.io.node_clipboard import (
@@ -61,8 +58,11 @@ from csv_editor.recording_dialog import RecordingDialog
 from csv_editor.services.capture import capture_point, capture_region
 from csv_editor.services.asset_usage import find_unused_images
 from csv_editor.services.summary import summarize_node, summarize_node_timing
-from csv_editor.services.validation import validate_document
 from csv_editor.undo_commands import DeleteNodeCommand, InsertNodeCommand, MoveNodeCommand, UpdateNodeCommand
+from csv_editor.widgets.node_inspector import (
+    NodeInspector,
+    allowed_operations_for_flow as _allowed_operations_for_flow,
+)
 
 CAPTURE_HIDE_DELAY_SECONDS = 0.2
 NODE_ID_ROLE = Qt.UserRole
@@ -153,16 +153,15 @@ class SummaryItemDelegate(QStyledItemDelegate):
 class EditorMainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.codec = CsvEditorCodec()
+        self.controller = EditorDocumentController()
         self.ocr_preview = RuntimeOcrPreviewAdapter()
         self.undo_stack = QUndoStack(self)
-        self.document: EditorDocument | None = None
-        self.current_flow_name: str | None = None
-        self.current_node_id: str | None = None
-        self.issues: list[ValidationIssue] = []
         self._recording_dialog: RecordingDialog | None = None
         self._syncing_selection = False
-        self._csv_preview_text = ""
+        self._rendered_flow_name: str | None = None
+        self._row_by_node_id: dict[str, int] = {}
+        self._preview_cache: dict[str, str] = {}
+        self._preview_dirty_flows: set[str] = set()
         self._title_base = "CsvAutoGui Editor"
         self.setWindowTitle(f"{self._title_base}[*]")
         self.resize(1400, 900)
@@ -320,7 +319,7 @@ class EditorMainWindow(QMainWindow):
         self.node_table.itemActivated.connect(self._on_node_table_item_activated)
         self.validation_list.itemSelectionChanged.connect(self._on_issue_selection_changed)
         self.node_table.customContextMenuRequested.connect(self._show_node_context_menu)
-        self.inspector.node_changed.connect(self._on_node_changed)
+        self.inspector.node_patched.connect(self._on_node_patch)
         self.inspector.action_requested.connect(self._on_inspector_action)
         self.inspector.image_preview_requested.connect(self._open_image_preview)
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
@@ -336,15 +335,10 @@ class EditorMainWindow(QMainWindow):
         if not root_path.exists():
             QMessageBox.warning(self, "路径不存在", f"未找到目录: {root_path}")
             return
-        document = self.codec.load_document(root_path)
-        self.document = document
+        change_set = self.controller.open_document(root_path)
         self.undo_stack.clear()
         self.undo_stack.setClean()
-        self.current_flow_name = document.state.selected_flow if document.get_flow(document.state.selected_flow) else None
-        if self.current_flow_name is None and document.flows:
-            self.current_flow_name = document.flows[0].filename
-        self.current_node_id = document.state.selected_node_id
-        self._refresh_all()
+        self.apply_change_set(change_set)
         self._update_actions_enabled(True)
         self.statusBar().showMessage(f"已打开: {root_path}")
         self._title_base = f"CsvAutoGui Editor - {root_path}"
@@ -354,21 +348,76 @@ class EditorMainWindow(QMainWindow):
     def reload_document(self) -> None:
         if not self.document:
             return
-        self.open_config_folder(self.document.root_path)
+        clear_runtime_caches()
+        change_set = self.controller.reload_document()
+        self.undo_stack.clear()
+        self.undo_stack.setClean()
+        self.apply_change_set(change_set)
+        self.statusBar().showMessage(f"已重新加载: {self.document.root_path}", 3000)
+        self.setWindowModified(False)
 
     def save_document(self) -> None:
         if not self.document:
             return
-        self.codec.save_document(self.document)
+        self.controller.save_document()
         self.undo_stack.setClean()
         self.statusBar().showMessage("CSV 已保存", 3000)
-        self._refresh_preview()
-
-    def _refresh_all(self) -> None:
-        self._refresh_flow_tree()
         self._refresh_validation()
-        self._refresh_node_table()
-        self._refresh_preview()
+        if self.current_flow:
+            self.update_validation_style(
+                frozenset(node.node_id for node in self.current_flow.nodes)
+            )
+
+    def apply_change_set(self, change_set: EditorChangeSet) -> None:
+        if change_set.impact is ChangeImpact.DOCUMENT_STRUCTURE:
+            self._preview_cache.clear()
+            self._preview_dirty_flows.clear()
+            self._refresh_flow_tree()
+            self._refresh_validation()
+            self.refresh_flow_table()
+            return
+
+        if change_set.flow_name is not None:
+            self._preview_dirty_flows.add(change_set.flow_name)
+
+        if self._rendered_flow_name != self.current_flow_name:
+            self._sync_flow_tree_selection()
+            self._refresh_validation()
+            self.refresh_flow_table()
+            return
+
+        if change_set.impact is ChangeImpact.FLOW_STRUCTURE:
+            self._refresh_validation()
+            self.refresh_flow_table()
+            return
+
+        if change_set.impact is ChangeImpact.REFERENCE_GRAPH:
+            self._refresh_validation()
+            self.rebuild_reference_targets()
+            flow = self.current_flow
+            node_ids = (
+                frozenset(node.node_id for node in flow.nodes)
+                if flow is not None
+                else frozenset()
+            )
+            if not self.update_node_rows(node_ids):
+                return
+            self._sync_node_table_selection(change_set.selected_node_id)
+            self.update_validation_style(node_ids)
+            self._sync_inspector(change_set)
+            return
+
+        if not change_set.node_ids:
+            self.refresh_flow_table()
+            return
+        if change_set.impact is ChangeImpact.NODE_VALIDATION:
+            self._refresh_validation()
+        if not self.update_node_rows(change_set.node_ids):
+            return
+        self._sync_node_table_selection(change_set.selected_node_id)
+        if change_set.impact is ChangeImpact.NODE_VALIDATION:
+            self.update_validation_style(change_set.node_ids)
+        self._sync_inspector(change_set)
 
     def _refresh_flow_tree(self) -> None:
         self.flow_tree.blockSignals(True)
@@ -389,17 +438,32 @@ class EditorMainWindow(QMainWindow):
         root_item.setExpanded(True)
         self.flow_tree.blockSignals(False)
 
+    def _sync_flow_tree_selection(self) -> None:
+        self.flow_tree.blockSignals(True)
+        try:
+            root_item = self.flow_tree.topLevelItem(0)
+            if root_item is None:
+                self._refresh_flow_tree()
+                return
+            for index in range(root_item.childCount()):
+                child = root_item.child(index)
+                if child.data(0, Qt.UserRole) == self.current_flow_name:
+                    self.flow_tree.setCurrentItem(child)
+                    return
+            self._refresh_flow_tree()
+        finally:
+            self.flow_tree.blockSignals(False)
+
     def _refresh_validation(self) -> None:
         self.validation_list.blockSignals(True)
         self.validation_list.clear()
-        if self.document:
-            self.issues = validate_document(self.document)
-        else:
-            self.issues = []
 
-        for issue in self.issues:
-            if self.current_flow_name and issue.flow_name != self.current_flow_name:
-                continue
+        visible_issues = (
+            self.controller.issues_for_flow(self.current_flow_name)
+            if self.current_flow_name
+            else self.issues
+        )
+        for issue in visible_issues:
             prefix = "错误" if issue.severity is ValidationSeverity.ERROR else "警告"
             item = QListWidgetItem(f"[{prefix}] {issue.message}")
             item.setData(Qt.UserRole, issue.node_id)
@@ -421,80 +485,266 @@ class EditorMainWindow(QMainWindow):
         self.node_table.setWordWrap(True)
         self.node_table.setTextElideMode(Qt.ElideNone)
 
-    def _refresh_node_table(self) -> None:
+    def refresh_flow_table(self) -> None:
         self.node_table.blockSignals(True)
-        self.node_table.setRowCount(0)
-        self.inspector.set_root_path(self.document.root_path if self.document else None)
-        flow = self.current_flow
-        if not flow:
-            self.node_table.blockSignals(False)
-            self.inspector.set_reference_data([], [], None)
-            self.inspector.set_node(None)
-            return
-
-        flow.reindex()
-        jump_targets = list(flow.jump_marks().keys())
-        subflow_targets = [name for name in self.document.iter_flow_filenames() if not is_resource_flow_filename(name)] if self.document else []
-        self.inspector.set_reference_data(jump_targets, subflow_targets, flow.filename)
-        issue_node_ids = {issue.node_id for issue in self.issues if issue.flow_name == flow.filename and issue.node_id}
-        self.node_table.clearSelection()
-        self.node_table.setRowCount(len(flow.nodes))
-        for row, node in enumerate(flow.nodes):
-            index_item = QTableWidgetItem(str(node.index))
-            type_item = QTableWidgetItem(node.operation)
-            jump_mark_item = QTableWidgetItem(node.jump_mark)
-            target_item = QTableWidgetItem(self._format_target_references(node))
-            summary_title = _summarize_editor_node(node)
-            summary_detail = _summarize_editor_timing(node, flow.filename)
-            summary_item = QTableWidgetItem(summary_title)
-            summary_item.setData(SUMMARY_TITLE_ROLE, summary_title)
-            summary_item.setData(SUMMARY_DETAIL_ROLE, summary_detail)
-            note_item = QTableWidgetItem(node.note)
-            for item in [index_item, type_item, jump_mark_item, target_item, summary_item, note_item]:
-                item.setData(NODE_ID_ROLE, node.node_id)
-                item.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
-            targets = self._resolvable_target_references(node)
-            if targets:
-                target_item.setData(TARGET_ROLE, targets)
-                if len(targets) == 1:
-                    target_tip = f"双击跳转到: {targets[0][1]}"
-                else:
-                    target_tip = "双击选择跳转目标:\n" + "\n".join(f"{label} -> {target}" for label, target in targets)
-                target_item.setToolTip(f"{target_item.text()}\n{target_tip}")
-            elif target_item.text():
-                target_item.setToolTip(target_item.text())
-            summary_item.setToolTip(summary_title if not summary_detail else f"{summary_title}\n{summary_detail}")
-            self._apply_node_table_style(
-                node,
-                issue_node_ids,
-                [index_item, type_item, jump_mark_item, target_item, summary_item, note_item],
-                selected=False,
+        self._syncing_selection = True
+        try:
+            self.node_table.setRowCount(0)
+            self._row_by_node_id = {}
+            self.inspector.set_root_path(
+                self.document.root_path if self.document else None
             )
-            self.node_table.setItem(row, 0, index_item)
-            self.node_table.setItem(row, 1, type_item)
-            self.node_table.setItem(row, 2, jump_mark_item)
-            self.node_table.setItem(row, 3, target_item)
-            self.node_table.setItem(row, 4, summary_item)
-            self.node_table.setItem(row, 5, note_item)
-            if node.node_id == self.current_node_id:
-                self.node_table.selectRow(row)
+            flow = self.current_flow
+            self._rendered_flow_name = flow.filename if flow else None
+            if not flow:
+                self.inspector.set_reference_data([], [], None)
+                self.inspector.set_node(None)
+                return
 
-        if self.current_node_id is None and flow.nodes:
-            self.current_node_id = flow.nodes[0].node_id
-            self.node_table.selectRow(0)
+            if self.current_node_id is None and flow.nodes:
+                self.controller.select_node(flow.nodes[0].node_id)
+            self.rebuild_reference_targets()
+            issue_node_ids = self.controller.issue_node_ids(flow.filename)
+            self.node_table.clearSelection()
+            self.node_table.setRowCount(len(flow.nodes))
+            for row, node in enumerate(flow.nodes):
+                self._row_by_node_id[node.node_id] = row
+                items = self._build_node_row_items(
+                    node,
+                    issue_node_ids,
+                    selected=node.node_id == self.current_node_id,
+                )
+                for column, item in enumerate(items):
+                    self.node_table.setItem(row, column, item)
+                if node.node_id == self.current_node_id:
+                    self.node_table.selectRow(row)
 
-        self._configure_node_table_columns()
-        self.node_table.resizeRowsToContents()
-        self.node_table.blockSignals(False)
+            self._configure_node_table_columns()
+            self.node_table.resizeRowsToContents()
+        finally:
+            self._syncing_selection = False
+            self.node_table.blockSignals(False)
         self._refresh_node_table_selection_styles()
         self.inspector.set_node(self.current_node)
 
-    def _refresh_preview(self) -> None:
+    def update_node_row(self, node_id: str) -> bool:
+        return self.update_node_rows(frozenset({node_id}))
+
+    def update_node_rows(self, node_ids: Collection[str]) -> bool:
+        target_ids = frozenset(node_ids)
+        if not target_ids:
+            self.refresh_flow_table()
+            return False
+        resolved_rows = []
+        for node_id in target_ids:
+            resolved = self._resolve_rendered_row(node_id)
+            if resolved is None:
+                self.refresh_flow_table()
+                return False
+            resolved_rows.append(resolved)
+
         flow = self.current_flow
-        if not flow:
-            self._csv_preview_text = ""
+        if flow is None:
+            self.refresh_flow_table()
+            return False
+        issue_node_ids = self.controller.issue_node_ids(flow.filename)
+        selected_rows = set(self._selected_row_indexes(self.node_table))
+        self.node_table.blockSignals(True)
+        self._syncing_selection = True
+        try:
+            for row, node, _items in resolved_rows:
+                replacement_items = self._build_node_row_items(
+                    node,
+                    issue_node_ids,
+                    selected=row in selected_rows,
+                )
+                for column, item in enumerate(replacement_items):
+                    self.node_table.setItem(row, column, item)
+                self.node_table.resizeRowToContents(row)
+        finally:
+            self._syncing_selection = False
+            self.node_table.blockSignals(False)
+        return True
+
+    def update_validation_style(self, node_ids: Collection[str]) -> None:
+        target_ids = frozenset(node_ids)
+        if not target_ids:
             return
-        self._csv_preview_text = self.codec.flow_to_csv_text(flow)
+        resolved_rows = []
+        for node_id in target_ids:
+            resolved = self._resolve_rendered_row(node_id)
+            if resolved is None:
+                self.refresh_flow_table()
+                return
+            resolved_rows.append(resolved)
+        flow = self.current_flow
+        if flow is None:
+            return
+        issue_node_ids = self.controller.issue_node_ids(flow.filename)
+        selected_rows = set(self._selected_row_indexes(self.node_table))
+        self.node_table.blockSignals(True)
+        try:
+            for row, node, items in resolved_rows:
+                self._apply_node_table_style(
+                    node,
+                    issue_node_ids,
+                    items,
+                    selected=row in selected_rows,
+                )
+        finally:
+            self.node_table.blockSignals(False)
+
+    def rebuild_reference_targets(self) -> None:
+        flow = self.current_flow
+        if flow is None:
+            self.inspector.set_reference_data([], [], None)
+            return
+        jump_targets = list(flow.jump_marks().keys())
+        subflow_targets = (
+            [
+                name
+                for name in self.document.iter_flow_filenames()
+                if not is_resource_flow_filename(name)
+            ]
+            if self.document
+            else []
+        )
+        self.inspector.set_reference_data(
+            jump_targets,
+            subflow_targets,
+            flow.filename,
+        )
+
+    def _build_node_row_items(
+        self,
+        node: OperationNode,
+        issue_node_ids: Collection[str],
+        *,
+        selected: bool,
+    ) -> list[QTableWidgetItem]:
+        flow = self.current_flow
+        flow_filename = flow.filename if flow else ""
+        index_item = QTableWidgetItem(str(node.index))
+        type_item = QTableWidgetItem(node.operation)
+        jump_mark_item = QTableWidgetItem(node.jump_mark)
+        target_item = QTableWidgetItem(self._format_target_references(node))
+        summary_title = _summarize_editor_node(node)
+        summary_detail = _summarize_editor_timing(node, flow_filename)
+        summary_item = QTableWidgetItem(summary_title)
+        summary_item.setData(SUMMARY_TITLE_ROLE, summary_title)
+        summary_item.setData(SUMMARY_DETAIL_ROLE, summary_detail)
+        note_item = QTableWidgetItem(node.note)
+        items = [
+            index_item,
+            type_item,
+            jump_mark_item,
+            target_item,
+            summary_item,
+            note_item,
+        ]
+        for item in items:
+            item.setData(NODE_ID_ROLE, node.node_id)
+            item.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
+        targets = self._resolvable_target_references(node)
+        if targets:
+            target_item.setData(TARGET_ROLE, targets)
+            if len(targets) == 1:
+                target_tip = f"双击跳转到: {targets[0][1]}"
+            else:
+                target_tip = "双击选择跳转目标:\n" + "\n".join(
+                    f"{label} -> {target}" for label, target in targets
+                )
+            target_item.setToolTip(f"{target_item.text()}\n{target_tip}")
+        elif target_item.text():
+            target_item.setToolTip(target_item.text())
+        summary_item.setToolTip(
+            summary_title
+            if not summary_detail
+            else f"{summary_title}\n{summary_detail}"
+        )
+        self._apply_node_table_style(
+            node,
+            issue_node_ids,
+            items,
+            selected=selected,
+        )
+        return items
+
+    def _resolve_rendered_row(
+        self,
+        node_id: str,
+    ) -> tuple[int, OperationNode, list[QTableWidgetItem]] | None:
+        flow = self.current_flow
+        if flow is None or self._rendered_flow_name != flow.filename:
+            return None
+        node = flow.get_node(node_id)
+        row = self._row_by_node_id.get(node_id)
+        if node is None or row is None or row < 0 or row >= self.node_table.rowCount():
+            return None
+        items = [
+            self.node_table.item(row, column)
+            for column in range(self.node_table.columnCount())
+        ]
+        if any(item is None for item in items):
+            return None
+        concrete_items = [item for item in items if item is not None]
+        if any(item.data(NODE_ID_ROLE) != node_id for item in concrete_items):
+            return None
+        return row, node, concrete_items
+
+    def _sync_inspector(self, change_set: EditorChangeSet) -> None:
+        node = self.current_node
+        if node is None:
+            self.inspector.set_node(None)
+            return
+        if node.node_id not in change_set.node_ids:
+            self.inspector.set_node(node)
+            return
+        self.inspector.sync_node(node, change_set.changed_fields)
+
+    def _sync_node_table_selection(self, node_id: str | None) -> None:
+        if node_id is None:
+            return
+        row = self._row_by_node_id.get(node_id)
+        if row is None or row < 0 or row >= self.node_table.rowCount():
+            self.refresh_flow_table()
+            return
+        current_item = self.node_table.item(self.node_table.currentRow(), 0)
+        current_node_id = (
+            current_item.data(NODE_ID_ROLE)
+            if current_item is not None
+            else None
+        )
+        if current_node_id == node_id:
+            return
+
+        self.node_table.blockSignals(True)
+        self._syncing_selection = True
+        try:
+            self.node_table.clearSelection()
+            self.node_table.setCurrentCell(row, 0)
+            self.node_table.selectRow(row)
+            item = self.node_table.item(row, 0)
+            if item is not None:
+                self.node_table.scrollToItem(
+                    item,
+                    QAbstractItemView.PositionAtCenter,
+                )
+        finally:
+            self._syncing_selection = False
+            self.node_table.blockSignals(False)
+        self._refresh_node_table_selection_styles()
+
+    def _get_csv_preview_text(self, flow_name: str) -> str:
+        if (
+            flow_name not in self._preview_cache
+            or flow_name in self._preview_dirty_flows
+        ):
+            self._preview_cache[flow_name] = self.controller.flow_to_csv_text(
+                flow_name
+            )
+            self._preview_dirty_flows.discard(flow_name)
+        return self._preview_cache[flow_name]
 
     def show_csv_preview_dialog(self) -> None:
         dialog = QDialog(self)
@@ -505,7 +755,12 @@ class EditorMainWindow(QMainWindow):
         layout = QVBoxLayout(dialog)
         text_edit = QPlainTextEdit()
         text_edit.setReadOnly(True)
-        text_edit.setPlainText(self._csv_preview_text)
+        preview_text = (
+            self._get_csv_preview_text(self.current_flow_name)
+            if self.current_flow_name
+            else ""
+        )
+        text_edit.setPlainText(preview_text)
         layout.addWidget(text_edit, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -532,7 +787,7 @@ class EditorMainWindow(QMainWindow):
                 continue
             self._syncing_selection = True
             try:
-                self.current_node_id = node_id
+                self.controller.select_node(node_id)
                 self.node_table.selectRow(row)
                 self.node_table.scrollToItem(self.node_table.item(row, 0), QAbstractItemView.PositionAtCenter)
                 self.inspector.set_node(node)
@@ -558,13 +813,14 @@ class EditorMainWindow(QMainWindow):
         return targets
 
     def _target_references(self, node: OperationNode) -> list[tuple[str, str]]:
+        contract = get_operation_contract(node.operation)
         if node.operation == OperationType.JUMP.value and node.param_text.strip():
             return [("jmp", node.param_text.strip())]
         if node.operation == OperationType.RESOURCE.value:
             parsed = parse_resource_param(node.param_text.strip())
             if parsed is not None and parsed[0] == "jmp" and node.jump_mark.strip():
                 return [(f"jmp {parsed[1]}", node.jump_mark.strip())]
-        if node.operation in {OperationType.PIC.value, OperationType.OCR.value} and node.branch.is_enabled:
+        if contract is not None and contract.supports_branch and node.branch.is_enabled:
             if node.branch.mode is BranchMode.JUMP_PAIR:
                 trigger = node.branch.trigger.value
                 fallback = "notExist" if trigger == BranchTrigger.EXIST.value else "exist"
@@ -579,7 +835,7 @@ class EditorMainWindow(QMainWindow):
     def _apply_node_table_style(
         self,
         node: OperationNode,
-        issue_node_ids: set[str],
+        issue_node_ids: Collection[str],
         items: list[QTableWidgetItem],
         *,
         selected: bool,
@@ -623,7 +879,7 @@ class EditorMainWindow(QMainWindow):
         flow = self.current_flow
         if not flow:
             return
-        issue_node_ids = {issue.node_id for issue in self.issues if issue.flow_name == flow.filename and issue.node_id}
+        issue_node_ids = self.controller.issue_node_ids(flow.filename)
         selected_rows = set(self._selected_row_indexes(self.node_table))
         for row, node in enumerate(flow.nodes):
             items = [self.node_table.item(row, column) for column in range(self.node_table.columnCount())]
@@ -643,22 +899,21 @@ class EditorMainWindow(QMainWindow):
         filename = selected[0].data(0, Qt.UserRole)
         if not filename:
             return
-        self.current_flow_name = filename
-        flow = self.current_flow
-        self.current_node_id = flow.nodes[0].node_id if flow and flow.nodes else None
+        self.controller.select_flow(filename)
         self._refresh_validation()
-        self._refresh_node_table()
-        self._refresh_preview()
+        self.refresh_flow_table()
 
     def _on_node_selection_changed(self) -> None:
+        if self._syncing_selection:
+            return
         current_row = self.node_table.currentRow()
         flow = self.current_flow
         if current_row < 0 or not flow or current_row >= len(flow.nodes):
-            self.current_node_id = None
+            self.controller.select_node(None)
             self._refresh_node_table_selection_styles()
             self.inspector.set_node(None)
             return
-        self.current_node_id = flow.nodes[current_row].node_id
+        self.controller.select_node(flow.nodes[current_row].node_id)
         self._refresh_node_table_selection_styles()
         self.inspector.set_node(flow.nodes[current_row])
 
@@ -694,18 +949,18 @@ class EditorMainWindow(QMainWindow):
                 self.node_table.selectRow(row)
                 break
 
-    def _on_node_changed(self, updated_node: OperationNode) -> None:
+    def _on_node_patch(self, patch: NodePatch) -> None:
         flow = self.current_flow
         if not flow:
             return
-        current = flow.get_node(updated_node.node_id)
-        if not current:
-            return
-        before = current.clone()
-        after = updated_node.clone()
-        if self._nodes_equal(before, after):
-            return
-        self.undo_stack.push(UpdateNodeCommand(self, flow.filename, before, after))
+        command = UpdateNodeCommand.from_patch(
+            self.controller,
+            flow.filename,
+            patch,
+            on_change=self.apply_change_set,
+        )
+        if command is not None:
+            self.undo_stack.push(command)
 
     def _on_inspector_action(self, action: str, node_id: str) -> None:
         if not self.document:
@@ -718,7 +973,6 @@ class EditorMainWindow(QMainWindow):
             return
 
         if action == "capture_pic":
-            before = node.clone()
             captured = self._capture_region_with_hidden_window()
             if not captured:
                 return
@@ -730,28 +984,35 @@ class EditorMainWindow(QMainWindow):
                 captured.width,
                 captured.height,
             )
-            node.search_target = filename
-            node.region_text = captured.region_text
+            changed_fields = {
+                "search_target": filename,
+                "region_text": captured.region_text,
+            }
             if not node.confidence_text:
-                node.confidence_text = "0.8"
+                changed_fields["confidence_text"] = str(
+                    require_operation_contract(OperationType.PIC).default_confidence
+                )
             self.statusBar().showMessage(f"已保存图片素材: {filename}", 4000)
-            after = node.clone()
-            node.apply_from(before)
-            self.undo_stack.push(UpdateNodeCommand(self, flow.filename, before, after, "截图回填图片节点"))
+            self._push_node_patch(
+                flow.filename,
+                NodePatch(node.node_id, changed_fields),
+                "截图回填图片节点",
+            )
 
         elif action == "capture_ocr":
-            before = node.clone()
             captured = self._capture_region_with_hidden_window()
             if not captured:
                 return
-            node.region_text = captured.region_text
+            changed_fields = {"region_text": captured.region_text}
             if not node.confidence_text:
-                node.confidence_text = "0.9"
+                changed_fields["confidence_text"] = str(
+                    require_operation_contract(OperationType.OCR).default_confidence
+                )
             candidates = self.ocr_preview.preview_from_image(captured.image)
             if candidates:
                 unique_candidates = list(dict.fromkeys(candidates))
                 if len(unique_candidates) == 1:
-                    node.search_target = unique_candidates[0]
+                    changed_fields["search_target"] = unique_candidates[0]
                     self.statusBar().showMessage(f"OCR 预览命中: {unique_candidates[0]}", 4000)
                 else:
                     selected, ok = QInputDialog.getItem(
@@ -763,26 +1024,43 @@ class EditorMainWindow(QMainWindow):
                         editable=True,
                     )
                     if ok and selected.strip():
-                        node.search_target = selected.strip()
+                        changed_fields["search_target"] = selected.strip()
             else:
                 QMessageBox.information(self, "OCR 预览", "当前区域未识别到可用文本，已仅回填搜索区域。")
-            after = node.clone()
-            node.apply_from(before)
-            if not self._nodes_equal(before, after):
-                self.undo_stack.push(UpdateNodeCommand(self, flow.filename, before, after, "截图回填 OCR 节点"))
+            self._push_node_patch(
+                flow.filename,
+                NodePatch(node.node_id, changed_fields),
+                "截图回填 OCR 节点",
+            )
 
         elif action == "pick_point":
-            before = node.clone()
             captured = self._capture_point_with_hidden_window()
             if not captured:
                 return
-            node.param_text = captured.point_text
             self.statusBar().showMessage(f"已回填坐标: {captured.point_text}", 3000)
-            after = node.clone()
-            node.apply_from(before)
-            self.undo_stack.push(UpdateNodeCommand(self, flow.filename, before, after, "拾取坐标"))
+            self._push_node_patch(
+                flow.filename,
+                NodePatch(node.node_id, {"param_text": captured.point_text}),
+                "拾取坐标",
+            )
         else:
             return
+
+    def _push_node_patch(
+        self,
+        flow_name: str,
+        patch: NodePatch,
+        text: str,
+    ) -> None:
+        command = UpdateNodeCommand.from_patch(
+            self.controller,
+            flow_name,
+            patch,
+            on_change=self.apply_change_set,
+            text=text,
+        )
+        if command is not None:
+            self.undo_stack.push(command)
 
     def _open_image_preview(self, image_path: Path) -> None:
         dialog = ImagePreviewDialog(image_path, self)
@@ -826,7 +1104,16 @@ class EditorMainWindow(QMainWindow):
         node = OperationNode(operation=operation)
         insert_at = self.node_table.currentRow()
         target_index = len(flow.nodes) if insert_at < 0 else insert_at + 1
-        self.undo_stack.push(InsertNodeCommand(self, flow.filename, node, target_index, "新增节点"))
+        self.undo_stack.push(
+            InsertNodeCommand(
+                self.controller,
+                flow.filename,
+                node,
+                target_index,
+                on_change=self.apply_change_set,
+                text="新增节点",
+            )
+        )
 
     def copy_selected_nodes(self) -> None:
         flow = self.current_flow
@@ -858,7 +1145,16 @@ class EditorMainWindow(QMainWindow):
         self.undo_stack.beginMacro("粘贴节点")
         try:
             for offset, node in enumerate(paste_nodes):
-                self.undo_stack.push(InsertNodeCommand(self, flow.filename, node, target_index + offset, "粘贴节点"))
+                self.undo_stack.push(
+                    InsertNodeCommand(
+                        self.controller,
+                        flow.filename,
+                        node,
+                        target_index + offset,
+                        on_change=self.apply_change_set,
+                        text="粘贴节点",
+                    )
+                )
         finally:
             self.undo_stack.endMacro()
 
@@ -871,7 +1167,7 @@ class EditorMainWindow(QMainWindow):
         if not self.document:
             QMessageBox.information(self, "未打开配置", "请先打开一个目标配置目录。")
             return
-        dialog = ExternalNodeImportDialog(self.codec, self)
+        dialog = ExternalNodeImportDialog(self.controller.codec, self)
         if dialog.exec() != QDialog.Accepted:
             return
         payload = dialog.selected_payload()
@@ -916,7 +1212,15 @@ class EditorMainWindow(QMainWindow):
                 if row < 0 or row >= len(flow.nodes):
                     continue
                 node = flow.nodes[row]
-                self.undo_stack.push(DeleteNodeCommand(self, flow.filename, node, row))
+                self.undo_stack.push(
+                    DeleteNodeCommand(
+                        self.controller,
+                        flow.filename,
+                        node,
+                        row,
+                        on_change=self.apply_change_set,
+                    )
+                )
         finally:
             self.undo_stack.endMacro()
 
@@ -938,7 +1242,17 @@ class EditorMainWindow(QMainWindow):
         if target_index < 0 or target_index >= len(flow.nodes):
             return
         text = "上移节点" if delta < 0 else "下移节点"
-        self.undo_stack.push(MoveNodeCommand(self, flow.filename, node.node_id, index, target_index, text))
+        self.undo_stack.push(
+            MoveNodeCommand(
+                self.controller,
+                flow.filename,
+                node.node_id,
+                index,
+                target_index,
+                on_change=self.apply_change_set,
+                text=text,
+            )
+        )
 
     def _show_node_context_menu(self, position) -> None:
         menu = QMenu(self)
@@ -1039,25 +1353,28 @@ class EditorMainWindow(QMainWindow):
             action.setEnabled(enabled)
 
     @property
+    def document(self) -> EditorDocument | None:
+        return self.controller.document
+
+    @property
+    def current_flow_name(self) -> str | None:
+        return self.controller.current_flow_name
+
+    @property
+    def current_node_id(self) -> str | None:
+        return self.controller.current_node_id
+
+    @property
+    def issues(self) -> list[ValidationIssue]:
+        return self.controller.issues
+
+    @property
     def current_flow(self) -> FlowDocument | None:
-        if not self.document or not self.current_flow_name:
-            return None
-        return self.document.get_flow(self.current_flow_name)
+        return self.controller.current_flow
 
     @property
     def current_node(self) -> OperationNode | None:
-        flow = self.current_flow
-        if not flow or not self.current_node_id:
-            return None
-        return flow.get_node(self.current_node_id)
-
-    @staticmethod
-    def _nodes_equal(left: OperationNode, right: OperationNode) -> bool:
-        left_copy = left.clone()
-        right_copy = right.clone()
-        left_copy.index = 0
-        right_copy.index = 0
-        return left_copy == right_copy
+        return self.controller.current_node
 
 
 class NodeTableWidget(QTableWidget):
@@ -1177,7 +1494,6 @@ class ExternalNodeImportDialog(QDialog):
         if not flow:
             return
 
-        flow.reindex()
         self.node_table.setRowCount(len(flow.nodes))
         for row, node in enumerate(flow.nodes):
             self.node_table.setItem(row, 0, QTableWidgetItem(str(node.index)))
@@ -1412,222 +1728,6 @@ class ImagePreviewDialog(QDialog):
         layout.addWidget(preview, 1)
 
 
-PIC_INLINE_PREVIEW_HEIGHT = 160
-EXPANDABLE_EDITOR_TEXT_COLUMNS = 50
-EXPANDABLE_EDITOR_MIN_WIDTH = 420
-EXPANDABLE_EDITOR_MAX_WIDTH = 560
-EXPANDABLE_EDITOR_ANCHOR_OFFSET = 6
-
-
-class AnchoredLineEditPopup(QDialog):
-    def __init__(self, anchor: QWidget, title: str, value: str) -> None:
-        super().__init__(anchor.window())
-        self._anchor = anchor
-        self._editor = QLineEdit(value, self)
-        self._editor.setObjectName("popupFieldInput")
-        self._editor.selectAll()
-
-        self.setObjectName("anchoredFieldEditorDialog")
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
-        self.setModal(True)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-
-        title_label = QLabel(f"编辑 {title}")
-        title_label.setObjectName("panelTitle")
-        layout.addWidget(title_label)
-        layout.addWidget(self._editor)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-        editor_metrics = self._editor.fontMetrics()
-        target_width = max(EXPANDABLE_EDITOR_MIN_WIDTH, editor_metrics.horizontalAdvance("M" * EXPANDABLE_EDITOR_TEXT_COLUMNS) + 48)
-        target_width = min(EXPANDABLE_EDITOR_MAX_WIDTH, target_width)
-        self.setFixedWidth(target_width)
-        self.adjustSize()
-        self._reposition()
-
-    def text(self) -> str:
-        return self._editor.text()
-
-    def _reposition(self) -> None:
-        anchor_top_left = self._anchor.mapToGlobal(QPoint(0, 0))
-        anchor_bottom_left = self._anchor.mapToGlobal(QPoint(0, self._anchor.height()))
-        screen = QGuiApplication.screenAt(anchor_top_left)
-        available = screen.availableGeometry() if screen is not None else QGuiApplication.primaryScreen().availableGeometry()
-
-        x = anchor_top_left.x()
-        y = anchor_bottom_left.y() + EXPANDABLE_EDITOR_ANCHOR_OFFSET
-
-        if x + self.width() > available.right():
-            x = max(available.left(), available.right() - self.width())
-        if y + self.height() > available.bottom():
-            y = anchor_top_left.y() - self.height() - EXPANDABLE_EDITOR_ANCHOR_OFFSET
-        if y < available.top():
-            y = max(available.top(), anchor_bottom_left.y() + EXPANDABLE_EDITOR_ANCHOR_OFFSET)
-
-        self.move(x, y)
-
-
-class ExpandableLineEdit(QLineEdit):
-    expandedTextCommitted = Signal()
-
-    def __init__(self, value: str, popup_title: str, parent: QWidget | None = None) -> None:
-        super().__init__(value, parent)
-        self._popup_title = popup_title
-        self._default_margins = self.textMargins()
-
-        self._expand_button = QToolButton(self)
-        self._expand_button.setObjectName("fieldExpandButton")
-        self._expand_button.setCursor(Qt.PointingHandCursor)
-        self._expand_button.setFocusPolicy(Qt.NoFocus)
-        self._expand_button.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
-        self._expand_button.setIconSize(QSize(10, 10))
-        self._expand_button.setToolTip("展开编辑")
-        self._expand_button.hide()
-        self._expand_button.clicked.connect(self._open_popup)
-
-        self.textChanged.connect(self._refresh_expand_button)
-        self._position_expand_button()
-
-    def focusInEvent(self, event) -> None:
-        super().focusInEvent(event)
-        self._refresh_expand_button()
-
-    def focusOutEvent(self, event) -> None:
-        super().focusOutEvent(event)
-        self._refresh_expand_button()
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._position_expand_button()
-        self._refresh_expand_button()
-
-    def _position_expand_button(self) -> None:
-        button_size = max(18, self.height() - 8)
-        self._expand_button.setFixedSize(button_size, button_size)
-        x = max(0, self.width() - button_size - 5)
-        y = max(0, (self.height() - button_size) // 2)
-        self._expand_button.move(x, y)
-
-    def _open_popup(self) -> None:
-        popup = AnchoredLineEditPopup(self, self._popup_title, self.text())
-        if popup.exec() == QDialog.Accepted:
-            new_text = popup.text()
-            if new_text != self.text():
-                self.setText(new_text)
-                self.expandedTextCommitted.emit()
-        self.setFocus(Qt.MouseFocusReason)
-        self._refresh_expand_button()
-
-    def _refresh_expand_button(self) -> None:
-        should_show = self.hasFocus() and self._text_overflows()
-        self._expand_button.setVisible(should_show)
-        right_margin = self._expand_button.width() + 8 if should_show else self._default_margins.right()
-        self.setTextMargins(
-            self._default_margins.left(),
-            self._default_margins.top(),
-            right_margin,
-            self._default_margins.bottom(),
-        )
-
-    def _text_overflows(self) -> bool:
-        text = self.text()
-        if not text:
-            return False
-
-        contents = self.contentsRect()
-        available_width = contents.width() - self._default_margins.left() - self._default_margins.right() - 6
-        if available_width <= 0:
-            return False
-        return self.fontMetrics().horizontalAdvance(text) > available_width
-
-
-class PicInlinePreviewLabel(QLabel):
-    image_requested = Signal(object)
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._source_pixmap = QPixmap()
-        self._image_path: Path | None = None
-        self.setObjectName("picInlinePreview")
-        self.setAlignment(Qt.AlignCenter)
-        self.setFixedHeight(PIC_INLINE_PREVIEW_HEIGHT)
-        self.setMinimumWidth(0)
-        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self.setScaledContents(False)
-        self._set_status("未设置图片文件")
-
-    @property
-    def image_path(self) -> Path | None:
-        return self._image_path
-
-    def sizeHint(self) -> QSize:
-        return QSize(220, PIC_INLINE_PREVIEW_HEIGHT)
-
-    def minimumSizeHint(self) -> QSize:
-        return QSize(0, PIC_INLINE_PREVIEW_HEIGHT)
-
-    def set_image(self, root_path: Path | None, filename: str) -> None:
-        filename = filename.strip()
-        self._source_pixmap = QPixmap()
-        self._image_path = None
-
-        if not filename:
-            self._set_status("未设置图片文件")
-            return
-        if root_path is None:
-            self._set_status("未选择配置目录")
-            return
-
-        image_path = root_path / filename
-        if not image_path.exists():
-            self._set_status("图片不存在")
-            self.setToolTip(str(image_path))
-            return
-
-        pixmap = QPixmap(str(image_path))
-        if pixmap.isNull():
-            self._set_status("无法加载图片")
-            self.setToolTip(str(image_path))
-            return
-
-        self._source_pixmap = pixmap
-        self._image_path = image_path
-        self.setText("")
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(f"点击查看大图: {image_path.name}")
-        self._sync_scaled_pixmap()
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._sync_scaled_pixmap()
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton and self._image_path is not None:
-            self.image_requested.emit(self._image_path)
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def _set_status(self, text: str) -> None:
-        self.clear()
-        self.setText(text)
-        self.setCursor(Qt.ArrowCursor)
-        self.setToolTip("")
-
-    def _sync_scaled_pixmap(self) -> None:
-        if self._source_pixmap.isNull():
-            return
-        target_width = max(1, self.width() - 8)
-        target_height = max(1, self.height() - 8)
-        scaled = self._source_pixmap.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.setPixmap(scaled)
 
 
 def _operation_color(operation: str) -> QColor:
@@ -1649,12 +1749,6 @@ def _operation_color(operation: str) -> QColor:
         OperationType.NOTIFY.value: QColor("#ca8a04"),
     }
     return colors.get(operation, QColor("#71717a"))
-
-
-def _allowed_operations_for_flow(flow_filename: str | None) -> list[str]:
-    if flow_filename and is_resource_flow_filename(flow_filename):
-        return [OperationType.RESOURCE.value]
-    return [item.value for item in OperationType if item is not OperationType.RESOURCE]
 
 
 def _summarize_editor_node(node: OperationNode) -> str:
@@ -1704,488 +1798,3 @@ def resolve_target_node(flow: FlowDocument, target: str) -> OperationNode | None
     if 1 <= index <= len(flow.nodes):
         return flow.nodes[index - 1]
     return None
-
-
-class NodeInspector(QWidget):
-    node_changed = Signal(OperationNode)
-    action_requested = Signal(str, str)
-    image_preview_requested = Signal(object)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._current_node: OperationNode | None = None
-        self._root_path: Path | None = None
-        self._building = False
-        self._widgets: dict[str, QWidget] = {}
-        self._jump_target_options: list[str] = []
-        self._subflow_options: list[str] = []
-        self._flow_filename: str | None = None
-
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        outer.addWidget(self.scroll)
-
-        self.panel = QWidget()
-        self.scroll.setWidget(self.panel)
-        self.layout = QVBoxLayout(self.panel)
-        self.layout.setContentsMargins(6, 6, 6, 6)
-        self.layout.setSpacing(8)
-        self.layout.setAlignment(Qt.AlignTop)
-        self.layout.addWidget(QLabel("请选择一个节点"))
-
-    def set_reference_data(self, jump_targets: list[str], subflow_targets: list[str], flow_filename: str | None) -> None:
-        self._jump_target_options = jump_targets
-        self._subflow_options = subflow_targets
-        self._flow_filename = flow_filename
-
-    def set_root_path(self, root_path: Path | None) -> None:
-        self._root_path = root_path
-
-    def set_node(self, node: OperationNode | None) -> None:
-        if node is None:
-            self._current_node = None
-        else:
-            self._current_node = OperationNode(
-                node_id=node.node_id,
-                index=node.index,
-                operation=node.operation,
-                param_text=node.param_text,
-                wait_value=node.wait_value,
-                wait_random=node.wait_random,
-                search_target=node.search_target,
-                region_text=node.region_text,
-                confidence_text=node.confidence_text,
-                retry_value=node.retry_value,
-                retry_random=node.retry_random,
-                pic_range_random=node.pic_range_random,
-                move_time=node.move_time,
-                jump_mark=node.jump_mark,
-                disable_grayscale=node.disable_grayscale,
-                note=node.note,
-                branch=BranchConfig(
-                    trigger=node.branch.trigger,
-                    mode=node.branch.mode,
-                    primary_target=node.branch.primary_target,
-                    secondary_target=node.branch.secondary_target,
-                ),
-            )
-        self._rebuild()
-
-    def _clear_layout(self) -> None:
-        while self.layout.count():
-            item = self.layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.setParent(None)
-                widget.deleteLater()
-
-    def _rebuild(self) -> None:
-        self._building = True
-        self._widgets = {}
-        self._clear_layout()
-
-        node = self._current_node
-        if node is None:
-            empty = QLabel("请选择一个节点")
-            empty.setObjectName("panelTitle")
-            self.layout.addWidget(empty)
-            self._building = False
-            return
-
-        title = QLabel(f"节点 #{node.index} - {node.operation}")
-        title.setObjectName("inspectorTitle")
-        self.layout.addWidget(title)
-
-        common_group = QGroupBox("通用属性")
-        common_form = self._create_compact_form(common_group)
-        operation_combo = QComboBox()
-        self._normalize_combo(operation_combo)
-        operation_combo.setObjectName("compactFieldCombo")
-        for value in self._available_operation_choices(node.operation):
-            operation_combo.addItem(value)
-        operation_combo.setCurrentText(node.operation)
-        operation_combo.currentTextChanged.connect(self._emit_change)
-        self._widgets["operation"] = operation_combo
-        self._add_grid_field(common_form, 0, 0, "操作类型", operation_combo)
-        next_row, next_column = 0, 1
-        if self._should_show_jump_mark(node):
-            self._widgets["jump_mark"] = self._line_edit(common_form, next_row, next_column, "跳转标记", node.jump_mark, expandable=True)
-            next_row, next_column = 1, 0
-        if node.operation != OperationType.RESOURCE.value:
-            self._widgets["wait_value"] = self._line_edit(common_form, next_row, next_column, "等待时间", node.wait_value)
-            self._widgets["wait_random"] = self._line_edit(common_form, next_row, 1, "等待随机", node.wait_random)
-            self._widgets["move_time"] = self._line_edit(common_form, next_row + 1, 0, "移动用时", node.move_time)
-            self._widgets["note"] = self._line_edit(common_form, next_row + 1, 1, "备注", node.note, expandable=True)
-        else:
-            self._widgets["note"] = self._line_edit(common_form, next_row, next_column, "备注", node.note, expandable=True)
-        self.layout.addWidget(common_group)
-
-        self.layout.addWidget(self._build_operation_group(node))
-        self.layout.addStretch(1)
-        self._building = False
-
-    def _available_operation_choices(self, current_operation: str) -> list[str]:
-        choices = _allowed_operations_for_flow(self._flow_filename)
-        if current_operation and current_operation not in choices:
-            return [current_operation, *choices]
-        return choices
-
-    def _should_show_jump_mark(self, node: OperationNode) -> bool:
-        if node.operation != OperationType.RESOURCE.value:
-            return True
-        parsed = parse_resource_param(node.param_text.strip())
-        return parsed is not None and parsed[0] == "jmp"
-
-    def _build_operation_group(self, node: OperationNode) -> QWidget:
-        operation = node.operation
-        group = QGroupBox("操作属性")
-        form = self._create_compact_form(group)
-
-        if operation in {
-            OperationType.CLICK.value,
-            OperationType.MOUSE_DOWN.value,
-            OperationType.MOUSE_UP.value,
-        }:
-            combo = QComboBox()
-            self._normalize_combo(combo)
-            combo.setObjectName("compactFieldCombo")
-            for button in ["left", "middle", "right", "x1", "x2"]:
-                combo.addItem(button)
-            combo.setCurrentText(node.param_text or "left")
-            combo.currentTextChanged.connect(self._emit_change)
-            self._widgets["param_text"] = combo
-            self._add_grid_field(form, 0, 0, "按钮", combo, span=2)
-            return group
-
-        if operation in {
-            OperationType.MOVE_REL.value,
-            OperationType.MOVE_TO.value,
-            OperationType.PRESS.value,
-            OperationType.KEY_DOWN.value,
-            OperationType.KEY_UP.value,
-            OperationType.WRITE.value,
-            OperationType.NOTIFY.value,
-            OperationType.JUMP.value,
-            OperationType.SCRIPT.value,
-        }:
-            label = "参数"
-            if operation in {OperationType.MOVE_REL.value, OperationType.MOVE_TO.value}:
-                label = "坐标/偏移"
-            elif operation in {OperationType.WRITE.value, OperationType.NOTIFY.value}:
-                label = "文本"
-            elif operation == OperationType.JUMP.value:
-                label = "跳转目标"
-            elif operation == OperationType.SCRIPT.value:
-                label = "脚本文件;资源文件"
-            if operation == OperationType.MOVE_TO.value:
-                self._widgets["param_text"] = self._line_with_button(form, 0, 0, label, node.param_text, "取点", "pick_point")
-            elif operation == OperationType.JUMP.value:
-                self._widgets["param_text"] = self._editable_combo(form, 0, 0, label, node.param_text, self._jump_target_options, span=2)
-            else:
-                self._widgets["param_text"] = self._line_edit(form, 0, 0, label, node.param_text, span=2)
-            return group
-
-        if operation == OperationType.RESOURCE.value:
-            parsed = parse_resource_param(node.param_text.strip())
-            resource_kind = parsed[0] if parsed is not None else "pic"
-            resource_alias = parsed[1] if parsed is not None else ""
-
-            kind_combo = QComboBox()
-            self._normalize_combo(kind_combo)
-            kind_combo.setObjectName("compactFieldCombo")
-            for item in ["pic", "ocr", "jmp"]:
-                kind_combo.addItem(item)
-            kind_combo.setCurrentText(resource_kind)
-            kind_combo.currentTextChanged.connect(self._emit_change)
-            self._widgets["resource_kind"] = kind_combo
-            self._add_grid_field(form, 0, 0, "资源类型", kind_combo)
-            self._widgets["resource_alias"] = self._line_edit(form, 0, 1, "脚本变量名", resource_alias, expandable=True)
-
-            if resource_kind in {"pic", "ocr"}:
-                target_label = "图片文件" if resource_kind == "pic" else "OCR 文本"
-                self._widgets["search_target"] = self._line_edit(form, 1, 0, target_label, node.search_target, expandable=True)
-                self._widgets["region_text"] = self._line_edit(form, 1, 1, "搜索区域", node.region_text, expandable=True)
-                self._widgets["confidence_text"] = self._line_edit(form, 2, 0, "置信度", node.confidence_text)
-
-                if resource_kind == "pic":
-                    grayscale_checkbox = QCheckBox()
-                    grayscale_checkbox.setChecked(node.disable_grayscale)
-                    grayscale_checkbox.stateChanged.connect(self._emit_change)
-                    self._widgets["disable_grayscale"] = grayscale_checkbox
-                    self._add_grid_field(form, 2, 1, "禁用灰度匹配", grayscale_checkbox)
-                    self._add_grid_field(form, 3, 0, "辅助采集", self._action_button("截图并回填", "capture_pic"), span=2)
-
-                    container = QWidget()
-                    container_layout = QVBoxLayout(container)
-                    container_layout.setContentsMargins(0, 0, 0, 0)
-                    container_layout.setSpacing(8)
-                    container_layout.addWidget(group)
-                    preview = PicInlinePreviewLabel()
-                    preview.set_image(self._root_path, node.search_target)
-                    preview.image_requested.connect(self.image_preview_requested)
-                    self._widgets["pic_preview"] = preview
-                    container_layout.addWidget(preview)
-                    return container
-
-                self._add_grid_field(form, 2, 1, "辅助采集", self._action_button("框选 OCR 区域", "capture_ocr"))
-                return group
-
-            self._add_grid_field(form, 1, 0, "跳转目标来源", QLabel("请在通用属性中的“跳转标记”填写真实跳转目标"), span=2)
-            return group
-
-        if operation in {OperationType.PIC.value, OperationType.OCR.value}:
-            target_label = "图片文件" if operation == OperationType.PIC.value else "OCR 文本"
-            self._widgets["search_target"] = self._line_edit(form, 0, 0, target_label, node.search_target, expandable=True)
-            self._widgets["region_text"] = self._line_edit(form, 0, 1, "搜索区域", node.region_text, expandable=True)
-            self._widgets["confidence_text"] = self._line_edit(form, 1, 0, "置信度", node.confidence_text)
-            self._widgets["retry_value"] = self._line_edit(form, 1, 1, "重试时间", node.retry_value)
-            self._widgets["retry_random"] = self._line_edit(form, 2, 0, "重试随机", node.retry_random)
-
-            random_checkbox = QCheckBox()
-            random_checkbox.setChecked(node.pic_range_random)
-            random_checkbox.stateChanged.connect(self._emit_change)
-            self._widgets["pic_range_random"] = random_checkbox
-            self._add_grid_field(form, 2, 1, "随机命中位置", random_checkbox)
-
-            if operation == OperationType.PIC.value:
-                grayscale_checkbox = QCheckBox()
-                grayscale_checkbox.setChecked(node.disable_grayscale)
-                grayscale_checkbox.stateChanged.connect(self._emit_change)
-                self._widgets["disable_grayscale"] = grayscale_checkbox
-                self._add_grid_field(form, 3, 0, "禁用灰度匹配", grayscale_checkbox)
-                self._add_grid_field(form, 3, 1, "辅助采集", self._action_button("截图并回填", "capture_pic"))
-            else:
-                self._add_grid_field(form, 3, 0, "辅助采集", self._action_button("框选 OCR 区域", "capture_ocr"), span=2)
-
-            branch_group = QGroupBox("分支")
-            branch_form = self._create_compact_form(branch_group)
-            trigger_combo = QComboBox()
-            self._normalize_combo(trigger_combo)
-            trigger_combo.setObjectName("compactFieldCombo")
-            for item in [BranchTrigger.NONE.value, BranchTrigger.EXIST.value, BranchTrigger.NOT_EXIST.value]:
-                trigger_combo.addItem(item)
-            trigger_combo.setCurrentText(node.branch.trigger.value)
-            trigger_combo.currentTextChanged.connect(self._emit_change)
-            self._widgets["branch_trigger"] = trigger_combo
-            self._add_grid_field(branch_form, 0, 0, "触发条件", trigger_combo)
-
-            mode_combo = QComboBox()
-            self._normalize_combo(mode_combo)
-            mode_combo.setObjectName("compactFieldCombo")
-            for item in [BranchMode.NONE.value, BranchMode.SUBFLOW.value, BranchMode.JUMP_PAIR.value]:
-                mode_combo.addItem(item)
-            mode_combo.setCurrentText(node.branch.mode.value)
-            mode_combo.currentTextChanged.connect(self._emit_change)
-            self._widgets["branch_mode"] = mode_combo
-            self._add_grid_field(branch_form, 0, 1, "分支模式", mode_combo)
-
-            branch_options = list(dict.fromkeys(self._subflow_options + self._jump_target_options))
-            self._widgets["branch_primary_target"] = self._editable_combo(branch_form, 1, 0, "主目标", node.branch.primary_target, branch_options, span=2)
-            self._widgets["branch_secondary_target"] = self._editable_combo(branch_form, 2, 0, "次目标", node.branch.secondary_target, branch_options, span=2)
-
-            container = QWidget()
-            container_layout = QVBoxLayout(container)
-            container_layout.setContentsMargins(0, 0, 0, 0)
-            container_layout.setSpacing(8)
-            container_layout.addWidget(group)
-            container_layout.addWidget(branch_group)
-            if operation == OperationType.PIC.value:
-                preview = PicInlinePreviewLabel()
-                preview.set_image(self._root_path, node.search_target)
-                preview.image_requested.connect(self.image_preview_requested)
-                self._widgets["pic_preview"] = preview
-                container_layout.addWidget(preview)
-            return container
-
-        self._add_grid_field(form, 0, 0, "说明", QLabel("当前操作暂未配置专门表单"), span=2)
-        return group
-
-    def _create_compact_form(self, parent: QWidget) -> QGridLayout:
-        grid = QGridLayout(parent)
-        grid.setContentsMargins(10, 12, 10, 10)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(6)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        return grid
-
-    def _create_field_label(self, text: str) -> QLabel:
-        label = QLabel(text)
-        label.setObjectName("fieldLabel")
-        return label
-
-    def _add_grid_field(self, form: QGridLayout, row: int, column: int, label: str, widget: QWidget, *, span: int = 1) -> None:
-        container = QWidget()
-        container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-        layout.addWidget(self._create_field_label(label))
-        layout.addWidget(widget)
-        form.addWidget(container, row, column, 1, span)
-
-    def _line_edit(
-        self,
-        form: QGridLayout,
-        row: int,
-        column: int,
-        label: str,
-        value: str,
-        *,
-        span: int = 1,
-        expandable: bool = False,
-    ) -> QLineEdit:
-        edit: QLineEdit
-        if expandable:
-            edit = ExpandableLineEdit(value, label)
-        else:
-            edit = QLineEdit(value)
-        self._normalize_field(edit)
-        edit.setObjectName("compactFieldInput")
-        edit.editingFinished.connect(self._emit_change)
-        if isinstance(edit, ExpandableLineEdit):
-            edit.expandedTextCommitted.connect(self._emit_change)
-        self._add_grid_field(form, row, column, label, edit, span=span)
-        return edit
-
-    def _editable_combo(
-        self,
-        form: QGridLayout,
-        row: int,
-        column: int,
-        label: str,
-        value: str,
-        options: list[str],
-        *,
-        span: int = 1,
-    ) -> QComboBox:
-        combo = QComboBox()
-        self._normalize_combo(combo)
-        combo.setObjectName("compactFieldCombo")
-        combo.setEditable(True)
-        combo.addItems(options)
-        combo.setCurrentText(value)
-        combo.currentIndexChanged.connect(self._emit_change)
-        line_edit = combo.lineEdit()
-        if line_edit is not None:
-            line_edit.editingFinished.connect(self._emit_change)
-        self._add_grid_field(form, row, column, label, combo, span=span)
-        return combo
-
-    def _line_with_button(
-        self,
-        form: QGridLayout,
-        row: int,
-        column: int,
-        label: str,
-        value: str,
-        button_text: str,
-        action: str,
-    ) -> QLineEdit:
-        edit = QLineEdit(value)
-        self._normalize_field(edit)
-        edit.setObjectName("compactFieldInput")
-        edit.editingFinished.connect(self._emit_change)
-        button = QPushButton(button_text)
-        button.setObjectName("compactFieldButton")
-        button.clicked.connect(lambda: self._request_action(action))
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        layout.addWidget(edit, 1)
-        layout.addWidget(button)
-        self._add_grid_field(form, row, column, label, container, span=2)
-        return edit
-
-    def _normalize_field(self, widget: QWidget) -> None:
-        widget.setMinimumWidth(0)
-        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-    def _normalize_combo(self, combo: QComboBox) -> None:
-        combo.setMinimumWidth(0)
-        combo.setMinimumContentsLength(6)
-        combo.setSizeAdjustPolicy(QComboBox.AdjustToContentsOnFirstShow)
-        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-    def _action_button(self, text: str, action: str) -> QPushButton:
-        button = QPushButton(text)
-        button.setObjectName("compactFieldButton")
-        button.clicked.connect(lambda: self._request_action(action))
-        return button
-
-    def _request_action(self, action: str) -> None:
-        if self._current_node is None:
-            return
-        self.action_requested.emit(action, self._current_node.node_id)
-
-    def _emit_change(self, *_args) -> None:
-        if self._building or self._current_node is None:
-            return
-
-        node = self._current_node
-
-        operation_widget = self._widgets.get("operation")
-        if isinstance(operation_widget, QComboBox):
-            node.operation = operation_widget.currentText()
-
-        for key in [
-            "jump_mark",
-            "wait_value",
-            "wait_random",
-            "move_time",
-            "note",
-            "param_text",
-            "search_target",
-            "region_text",
-            "confidence_text",
-            "retry_value",
-            "retry_random",
-        ]:
-            widget = self._widgets.get(key)
-            if isinstance(widget, QLineEdit):
-                setattr(node, key, widget.text())
-
-        random_checkbox = self._widgets.get("pic_range_random")
-        if isinstance(random_checkbox, QCheckBox):
-            node.pic_range_random = random_checkbox.isChecked()
-
-        grayscale_checkbox = self._widgets.get("disable_grayscale")
-        if isinstance(grayscale_checkbox, QCheckBox):
-            node.disable_grayscale = grayscale_checkbox.isChecked()
-
-        trigger_combo = self._widgets.get("branch_trigger")
-        if isinstance(trigger_combo, QComboBox):
-            node.branch.trigger = BranchTrigger(trigger_combo.currentText())
-
-        mode_combo = self._widgets.get("branch_mode")
-        if isinstance(mode_combo, QComboBox):
-            node.branch.mode = BranchMode(mode_combo.currentText())
-
-        branch_primary = self._widgets.get("branch_primary_target")
-        if isinstance(branch_primary, QLineEdit):
-            node.branch.primary_target = branch_primary.text()
-        elif isinstance(branch_primary, QComboBox):
-            node.branch.primary_target = branch_primary.currentText()
-
-        branch_secondary = self._widgets.get("branch_secondary_target")
-        if isinstance(branch_secondary, QLineEdit):
-            node.branch.secondary_target = branch_secondary.text()
-        elif isinstance(branch_secondary, QComboBox):
-            node.branch.secondary_target = branch_secondary.currentText()
-
-        param_widget = self._widgets.get("param_text")
-        if isinstance(param_widget, QComboBox):
-            node.param_text = param_widget.currentText()
-        elif isinstance(param_widget, QLineEdit):
-            node.param_text = param_widget.text()
-
-        resource_kind = self._widgets.get("resource_kind")
-        resource_alias = self._widgets.get("resource_alias")
-        if isinstance(resource_kind, QComboBox) and isinstance(resource_alias, QLineEdit):
-            node.param_text = f"{resource_kind.currentText().strip()};{resource_alias.text().strip()}"
-
-        self.node_changed.emit(node)

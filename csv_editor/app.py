@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
-from autogui import ocr as runtime_ocr
+from autogui.vision import ocr as runtime_ocr
 
 from .main_window import EditorMainWindow
 from .theme import apply_editor_theme

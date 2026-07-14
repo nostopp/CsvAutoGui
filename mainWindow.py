@@ -1,5 +1,6 @@
 import argparse
 import json
+import queue
 import signal
 import threading
 import tkinter as tk
@@ -9,14 +10,22 @@ from tkinter import filedialog, messagebox, ttk
 
 import keyboard
 
-import autogui.ocr
-from autogui.config_paths import display_config_path
+from autogui.infrastructure.paths import display_config_path
+from autogui.runtime.cache import clear_runtime_caches
+from autogui.vision import ocr
 import main as main_module
+from manager_logs import (
+    InstanceLogBuffer,
+    InstanceStatusEvent,
+    LogEvent,
+    drain_log_events,
+    log_tag_for_message,
+    normalize_log_message,
+)
 
 
 BG_COLOR = "#f3f7fb"
 CARD_COLOR = "#ffffff"
-CARD_MUTED = "#f7faff"
 BORDER_COLOR = "#dbe5f0"
 TEXT_COLOR = "#16324a"
 MUTED_TEXT = "#71849a"
@@ -25,6 +34,12 @@ ACCENT_ACTIVE = "#1f63c8"
 SUCCESS_COLOR = "#178a67"
 WARNING_COLOR = "#bd7b1a"
 DANGER_COLOR = "#d25f50"
+LOG_DRAIN_INTERVAL_MS = 50
+LOG_DRAIN_BATCH_SIZE = 300
+LOG_BUFFER_MAX_ENTRIES = 5000
+LOG_SEARCH_DEBOUNCE_MS = 200
+LOG_BATCH_START_MARK = "_log_batch_start"
+LOG_SEARCH_MATCH_TAGS = ("search_match", "search_match_alt")
 
 
 class InstanceEntry:
@@ -34,7 +49,7 @@ class InstanceEntry:
         self.args = args
         self.thread = None
         self.stop_event = threading.Event()
-        self.logs = []
+        self.logs = InstanceLogBuffer(LOG_BUFFER_MAX_ENTRIES)
         self.running = False
         self.restart_pending = False
 
@@ -56,9 +71,15 @@ class MainWindow:
         defaults = main_module.parse_args([])
         self.instances: dict[int, InstanceEntry] = {}
         self.next_id = 1
+        self._log_queue: queue.SimpleQueue[LogEvent] = queue.SimpleQueue()
+        self._instance_status_queue: queue.SimpleQueue[InstanceStatusEvent] = queue.SimpleQueue()
+        self._accept_log_events = threading.Event()
+        self._accept_log_events.set()
+        self._hotkey_stop_requested = threading.Event()
+        self._log_drain_job = None
+        self._log_search_job = None
         self.log_search_var = tk.StringVar()
-        self._log_search_matches: list[tuple[str, str]] = []
-        self._log_search_current = -1
+        self._log_search_applied_query = ""
 
         self.var_loop = tk.BooleanVar(value=defaults.loop)
         self.var_log = tk.BooleanVar(value=defaults.log)
@@ -67,7 +88,6 @@ class MainWindow:
         self.var_click_move_cursor = tk.BooleanVar(value=defaults.click_move_cursor)
         self.var_process = tk.BooleanVar(value=defaults.process)
         self.var_screenshots = tk.BooleanVar(value=defaults.screenshots)
-        self.var_record = tk.BooleanVar(value=defaults.record)
 
         self._build_layout(defaults)
         self._configure_log_tags()
@@ -76,8 +96,9 @@ class MainWindow:
         self._refresh_instance_summary()
         self._set_status("就绪，可直接启动实例")
 
-        keyboard.add_hotkey("ctrl+shift+x", self.stop_all)
+        keyboard.add_hotkey("ctrl+shift+x", self._request_stop_all)
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self._schedule_log_drain()
 
     def _configure_styles(self):
         if "clam" in self.style.theme_names():
@@ -571,6 +592,7 @@ class MainWindow:
         self.txt_log.tag_configure("success", foreground=SUCCESS_COLOR)
         self.txt_log.tag_configure("meta", foreground="#7b8794")
         self.txt_log.tag_configure("search_match", background="#fff1a8", foreground="#17324d")
+        self.txt_log.tag_configure("search_match_alt", background="#fff1a8", foreground="#17324d")
         self.txt_log.tag_configure("search_current", background="#ffcf5a", foreground="#10253a")
 
     def _set_status(self, text: str):
@@ -588,8 +610,6 @@ class MainWindow:
             flags.append("移动")
         if inst.args.multi_window:
             flags.append("多窗")
-        if inst.args.record:
-            flags.append("录制")
         if inst.args.screenshots:
             flags.append("截图")
         return " / ".join(flags) if flags else "默认"
@@ -666,82 +686,257 @@ class MainWindow:
         self._refresh_log_search_buttons()
 
     def _refresh_log_search_buttons(self):
-        has_matches = bool(self._log_search_matches)
+        has_matches = bool(self._search_match_ranges())
         state = tk.NORMAL if has_matches else tk.DISABLED
         for button in (getattr(self, "btn_search_prev", None), getattr(self, "btn_search_next", None)):
             if button is not None:
                 button.configure(state=state)
 
+    def _search_match_ranges(self):
+        groups = []
+        for tag_name in LOG_SEARCH_MATCH_TAGS:
+            ranges = self.txt_log.tag_ranges(tag_name)
+            groups.append(tuple(zip(ranges[::2], ranges[1::2])))
+
+        primary, alternate = groups
+        primary_index = 0
+        alternate_index = 0
+        matches = []
+        while primary_index < len(primary) and alternate_index < len(alternate):
+            primary_match = primary[primary_index]
+            alternate_match = alternate[alternate_index]
+            if self.txt_log.compare(primary_match[0], "<", alternate_match[0]):
+                matches.append(primary_match)
+                primary_index += 1
+            else:
+                matches.append(alternate_match)
+                alternate_index += 1
+        matches.extend(primary[primary_index:])
+        matches.extend(alternate[alternate_index:])
+        return tuple(matches)
+
+    def _current_search_range(self):
+        ranges = self.txt_log.tag_ranges("search_current")
+        if len(ranges) < 2:
+            return None
+        return ranges[0], ranges[1]
+
+    def _remove_tag_ranges(self, tag_name: str):
+        ranges = self.txt_log.tag_ranges(tag_name)
+        for start, end in zip(ranges[::2], ranges[1::2]):
+            self.txt_log.tag_remove(tag_name, start, end)
+
     def _clear_log_search_tags(self):
-        self.txt_log.tag_remove("search_match", "1.0", tk.END)
-        self.txt_log.tag_remove("search_current", "1.0", tk.END)
+        for tag_name in LOG_SEARCH_MATCH_TAGS:
+            self._remove_tag_ranges(tag_name)
+        self._remove_tag_ranges("search_current")
 
     def _set_log_search_result_text(self, text: str):
         if hasattr(self, "lbl_search_result"):
             self.lbl_search_result.configure(text=text)
 
     def _on_log_search_changed(self, *_args):
-        self.refresh_log_search()
+        if self._log_search_job is not None:
+            try:
+                self.root.after_cancel(self._log_search_job)
+            except Exception:
+                pass
+            self._log_search_job = None
 
-    def refresh_log_search(self):
-        query = self.log_search_var.get().strip()
-        self._log_search_matches = []
-        self._log_search_current = -1
-
-        self.txt_log["state"] = "normal"
+        self._log_search_applied_query = ""
         self._clear_log_search_tags()
+        query = self.log_search_var.get().strip()
         if not query:
-            self.txt_log["state"] = "disabled"
             self._set_log_search_result_text("未搜索")
             self._refresh_log_search_buttons()
             return
 
-        start_index = "1.0"
+        self._set_log_search_result_text("搜索中…")
+        self._refresh_log_search_buttons()
+        self._log_search_job = self.root.after(
+            LOG_SEARCH_DEBOUNCE_MS,
+            self._run_debounced_log_search,
+        )
+
+    def _run_debounced_log_search(self):
+        self._log_search_job = None
+        if self._closing:
+            return
+        self.refresh_log_search()
+
+    def _tcl_char_count(self, text: str) -> int:
+        try:
+            return int(self.txt_log.tk.call("string", "length", text))
+        except Exception:
+            return len(text)
+
+    def _add_log_search_matches(self, query: str, start_index, stop_index):
+        if not query:
+            return
+        query_length = self._tcl_char_count(query)
+        search_index = start_index
+        previous_end = None
+        previous_tag = None
+        for tag_name in LOG_SEARCH_MATCH_TAGS:
+            previous_range = self.txt_log.tag_prevrange(
+                tag_name,
+                start_index,
+                "1.0",
+            )
+            if (
+                previous_range
+                and self.txt_log.compare(previous_range[1], "==", start_index)
+            ):
+                previous_end = previous_range[1]
+                previous_tag = tag_name
+                break
+
         while True:
-            match_start = self.txt_log.search(query, start_index, stopindex=tk.END, nocase=True)
+            match_start = self.txt_log.search(
+                query,
+                search_index,
+                stopindex=stop_index,
+                nocase=True,
+            )
             if not match_start:
                 break
-            match_end = f"{match_start}+{len(query)}c"
-            self.txt_log.tag_add("search_match", match_start, match_end)
-            self._log_search_matches.append((match_start, match_end))
-            start_index = match_end
+            match_end = f"{match_start}+{query_length}c"
+            tag_name = LOG_SEARCH_MATCH_TAGS[0]
+            if (
+                previous_end is not None
+                and self.txt_log.compare(previous_end, "==", match_start)
+                and previous_tag is not None
+            ):
+                tag_name = (
+                    LOG_SEARCH_MATCH_TAGS[1]
+                    if previous_tag == LOG_SEARCH_MATCH_TAGS[0]
+                    else LOG_SEARCH_MATCH_TAGS[0]
+                )
+            self.txt_log.tag_add(tag_name, match_start, match_end)
+            previous_end = match_end
+            previous_tag = tag_name
+            search_index = match_end
 
-        self.txt_log["state"] = "disabled"
-        if not self._log_search_matches:
+    def _next_search_match_range(self, index):
+        candidates = [
+            candidate
+            for tag_name in LOG_SEARCH_MATCH_TAGS
+            if (candidate := self.txt_log.tag_nextrange(tag_name, index, tk.END))
+        ]
+        if not candidates:
+            return ()
+        target = candidates[0]
+        for candidate in candidates[1:]:
+            if self.txt_log.compare(candidate[0], "<", target[0]):
+                target = candidate
+        return target
+
+    def _previous_search_match_range(self, index):
+        candidates = [
+            candidate
+            for tag_name in LOG_SEARCH_MATCH_TAGS
+            if (candidate := self.txt_log.tag_prevrange(tag_name, index, "1.0"))
+        ]
+        if not candidates:
+            return ()
+        target = candidates[0]
+        for candidate in candidates[1:]:
+            if self.txt_log.compare(candidate[0], ">", target[0]):
+                target = candidate
+        return target
+
+    def refresh_log_search(self):
+        query = self.log_search_var.get().strip()
+        self._clear_log_search_tags()
+        if not query:
+            self._log_search_applied_query = ""
+            self._set_log_search_result_text("未搜索")
+            self._refresh_log_search_buttons()
+            return
+
+        self._log_search_applied_query = query
+        self._add_log_search_matches(query, "1.0", tk.END)
+        matches = self._search_match_ranges()
+        if matches:
+            self._focus_log_search_match(matches[0])
+        else:
+            self._update_log_search_result()
+
+    def _update_log_search_result(self):
+        query = self.log_search_var.get().strip()
+        if not query:
+            self._set_log_search_result_text("未搜索")
+            self._refresh_log_search_buttons()
+            return
+        if self._log_search_applied_query != query:
+            self._set_log_search_result_text("搜索中…")
+            self._refresh_log_search_buttons()
+            return
+
+        matches = self._search_match_ranges()
+        if not matches:
             self._set_log_search_result_text("0 结果")
             self._refresh_log_search_buttons()
             return
 
-        self._log_search_current = 0
-        self._focus_log_search_match()
-
-    def _focus_log_search_match(self):
-        if not self._log_search_matches:
-            self._set_log_search_result_text("0 结果")
+        current = self._current_search_range()
+        if current is None:
+            self._set_log_search_result_text(f"{len(matches)} 结果")
             self._refresh_log_search_buttons()
             return
 
-        self.txt_log["state"] = "normal"
-        self.txt_log.tag_remove("search_current", "1.0", tk.END)
-        start, end = self._log_search_matches[self._log_search_current]
+        current_start = self.txt_log.index(current[0])
+        current_position = next(
+            (
+                position
+                for position, (start, _end) in enumerate(matches, start=1)
+                if self.txt_log.index(start) == current_start
+            ),
+            None,
+        )
+        if current_position is None:
+            self._remove_tag_ranges("search_current")
+            self._set_log_search_result_text(f"{len(matches)} 结果")
+        else:
+            self._set_log_search_result_text(f"{current_position}/{len(matches)}")
+        self._refresh_log_search_buttons()
+
+    def _focus_log_search_match(self, match_range):
+        if not match_range:
+            self._update_log_search_result()
+            return
+        self._remove_tag_ranges("search_current")
+        start, end = match_range
         self.txt_log.tag_add("search_current", start, end)
         self.txt_log.mark_set(tk.INSERT, start)
         self.txt_log.see(start)
-        self.txt_log["state"] = "disabled"
-        self._set_log_search_result_text(f"{self._log_search_current + 1}/{len(self._log_search_matches)}")
-        self._refresh_log_search_buttons()
+        self._update_log_search_result()
 
     def goto_previous_search_match(self):
-        if not self._log_search_matches:
+        matches = self._search_match_ranges()
+        if not matches:
             return
-        self._log_search_current = (self._log_search_current - 1) % len(self._log_search_matches)
-        self._focus_log_search_match()
+        current = self._current_search_range()
+        if current is None:
+            target = matches[-1]
+        else:
+            target = self._previous_search_match_range(current[0])
+            if not target:
+                target = self._previous_search_match_range(tk.END)
+        self._focus_log_search_match(target)
 
     def goto_next_search_match(self):
-        if not self._log_search_matches:
+        matches = self._search_match_ranges()
+        if not matches:
             return
-        self._log_search_current = (self._log_search_current + 1) % len(self._log_search_matches)
-        self._focus_log_search_match()
+        current = self._current_search_range()
+        if current is None:
+            target = matches[0]
+        else:
+            target = self._next_search_match_range(current[1])
+            if not target:
+                target = self._next_search_match_range("1.0")
+        self._focus_log_search_match(target)
 
     def _update_log_header(self, inst: InstanceEntry | None):
         count = len(inst.logs) if inst else 0
@@ -760,6 +955,15 @@ class MainWindow:
         if self._closing:
             return
         self._closing = True
+        self._accept_log_events.clear()
+        for job_attr in ("_log_drain_job", "_log_search_job"):
+            job = getattr(self, job_attr, None)
+            if job is not None:
+                try:
+                    self.root.after_cancel(job)
+                except Exception:
+                    pass
+                setattr(self, job_attr, None)
         try:
             keyboard.remove_hotkey("ctrl+shift+x")
         except Exception:
@@ -798,7 +1002,6 @@ class MainWindow:
             multi_window=self.var_multi.get(),
             click_move_cursor=self.var_click_move_cursor.get(),
             process=self.var_process.get(),
-            record=self.var_record.get(),
             _from_window=True,
         )
 
@@ -813,30 +1016,67 @@ class MainWindow:
             return Path(raw).as_posix()
 
     def _normalize_log_message(self, msg: str) -> str:
-        normalized = msg
-        level_markers = ("[DEBUG]", "[INFO]", "[WARNING]", "[WARN]", "[ERROR]", "[TRACE]")
-        marker_positions = [normalized.find(marker) for marker in level_markers if marker in normalized]
-        if marker_positions:
-            start = min(pos for pos in marker_positions if pos >= 0)
-            normalized = normalized[start:]
-        return normalized
+        return normalize_log_message(msg)
 
     def _log_tag_for_message(self, msg: str) -> str:
-        upper = msg.upper()
-        if "[ERROR]" in upper or "异常" in msg or "失败" in msg:
-            return "error"
-        if "[WARNING]" in upper or "警告" in msg:
-            return "warn"
-        if "[DEBUG]" in upper:
-            return "debug"
-        if "成功" in msg or "完成" in msg:
-            return "success"
-        if "启动" in msg or "停止" in msg or "重启" in msg:
-            return "meta"
-        return "info"
+        return log_tag_for_message(msg)
 
-    def _append_log_to_view(self, msg: str):
-        msg = self._normalize_log_message(msg)
+    def _request_stop_all(self):
+        self._hotkey_stop_requested.set()
+
+    def _enqueue_log_event(self, instance_id: int, message: str):
+        if self._closing or not self._accept_log_events.is_set():
+            return
+        self._log_queue.put(LogEvent(instance_id, normalize_log_message(message)))
+
+    def _enqueue_instance_status(self, instance_id: int, status: str):
+        if self._closing:
+            return
+        self._instance_status_queue.put(InstanceStatusEvent(instance_id, status))
+
+    def _schedule_log_drain(self, delay_ms: int = LOG_DRAIN_INTERVAL_MS):
+        if self._closing or self._log_drain_job is not None:
+            return
+        self._log_drain_job = self.root.after(delay_ms, self._drain_log_queue)
+
+    def _drain_log_queue(self):
+        self._log_drain_job = None
+        if self._closing:
+            return
+
+        if self._hotkey_stop_requested.is_set():
+            self._hotkey_stop_requested.clear()
+            self.stop_all()
+
+        for _ in range(LOG_DRAIN_BATCH_SIZE):
+            try:
+                status_event = self._instance_status_queue.get_nowait()
+            except queue.Empty:
+                break
+            inst = self.instances.get(status_event.instance_id)
+            if inst is not None:
+                self._update_tree_item(inst, status_event.status)
+
+        drained = drain_log_events(
+            self._log_queue,
+            {instance_id: inst.logs for instance_id, inst in self.instances.items()},
+            max_events=LOG_DRAIN_BATCH_SIZE,
+            accepting=self._accept_log_events.is_set(),
+        )
+        selected = self.get_selected_instance()
+        selected_id = selected.id if selected is not None else None
+        selected_events = tuple(
+            item for item in drained if item.event.instance_id == selected_id
+        )
+        if selected_events:
+            self._append_log_batch_to_view(selected_events)
+            self._update_log_header(selected)
+
+        self._schedule_log_drain()
+
+    def _append_log_batch_to_view(self, events):
+        if not events:
+            return
         try:
             yview = self.txt_log.yview()
             at_bottom = yview[1] >= 0.999
@@ -844,48 +1084,61 @@ class MainWindow:
             at_bottom = True
 
         self.txt_log["state"] = "normal"
-        self.txt_log.insert(tk.END, msg, self._log_tag_for_message(msg))
+        mark_created = False
+        try:
+            for item in events:
+                if item.removed_text:
+                    removed_length = self._tcl_char_count(item.removed_text)
+                    self.txt_log.delete("1.0", f"1.0+{removed_length}c")
+                if not mark_created:
+                    self.txt_log.mark_set(LOG_BATCH_START_MARK, "end-1c")
+                    self.txt_log.mark_gravity(LOG_BATCH_START_MARK, tk.LEFT)
+                    mark_created = True
+                message = self._normalize_log_message(item.event.text)
+                self.txt_log.insert(
+                    tk.END,
+                    message,
+                    self._log_tag_for_message(message),
+                )
+        finally:
+            self.txt_log["state"] = "disabled"
+
+        query = self.log_search_var.get().strip()
+        if (
+            mark_created
+            and query
+            and self._log_search_applied_query == query
+        ):
+            self._add_log_search_matches(
+                query,
+                self.txt_log.index(LOG_BATCH_START_MARK),
+                tk.END,
+            )
+        if mark_created:
+            self.txt_log.mark_unset(LOG_BATCH_START_MARK)
+        self._update_log_search_result()
         if at_bottom:
             self.txt_log.see(tk.END)
-        self.txt_log["state"] = "disabled"
-        self.refresh_log_search()
-        self._refresh_selection_actions()
 
     def _render_selected_logs(self, inst: InstanceEntry | None):
         self.txt_log["state"] = "normal"
         self.txt_log.delete("1.0", tk.END)
         if inst:
-            for msg in inst.logs:
+            for msg in inst.logs.snapshot():
                 normalized = self._normalize_log_message(msg)
                 self.txt_log.insert(tk.END, normalized, self._log_tag_for_message(normalized))
         self.txt_log["state"] = "disabled"
-        self.refresh_log_search()
+        self._on_log_search_changed()
         self._update_log_header(inst)
         self._refresh_selection_actions()
 
     def _launch_instance_thread(self, inst):
         def log_cb(msg: str):
-            if not msg.endswith("\n"):
-                msg = msg + "\n"
-            normalized = self._normalize_log_message(msg)
-            inst.logs.append(normalized)
-            if len(inst.logs) > 5000:
-                inst.logs = inst.logs[-2500:]
-
-            def _update():
-                sel = self.get_selected_instance()
-                if sel and sel.id == inst.id:
-                    self._append_log_to_view(normalized)
-                    self._update_log_header(inst)
-
-            self.root.after(1, _update)
+            self._enqueue_log_event(inst.id, msg)
 
         def target():
             inst.running = True
-            try:
-                self.root.after(1, lambda: self._update_tree_item(inst, "运行中"))
-            except Exception:
-                pass
+            self._enqueue_instance_status(inst.id, "运行中")
 
             try:
                 main_module.start_instance(inst.args, log_callback=log_cb, stop_event=inst.stop_event, use_hotkey=False)
@@ -893,7 +1146,7 @@ class MainWindow:
                 log_cb(f"实例异常结束: {exc}\n")
             finally:
                 inst.running = False
-                self.root.after(1, lambda: self._update_tree_item(inst, "已停止"))
+                self._enqueue_instance_status(inst.id, "已停止")
 
         t = threading.Thread(target=target, daemon=True)
         inst.thread = t
@@ -976,7 +1229,12 @@ class MainWindow:
         self._poll_restart_instance(inst)
 
     def _poll_restart_instance(self, inst, remaining_checks=30):
-        if not inst.restart_pending:
+        if (
+            self._closing
+            or not inst.restart_pending
+            or self.instances.get(inst.id) is not inst
+        ):
+            inst.restart_pending = False
             return
 
         if not inst.running:
@@ -1004,7 +1262,6 @@ class MainWindow:
             inst.stop_event.set()
 
         self.instances.clear()
-        self.next_id = 1
         for item in self.treeview.get_children():
             self.treeview.delete(item)
         self._update_treeview_column_widths()
@@ -1031,7 +1288,6 @@ class MainWindow:
             "multi_window": args.multi_window,
             "click_move_cursor": args.click_move_cursor,
             "process": args.process,
-            "record": args.record,
         }
 
         path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")], title="保存参数为 JSON")
@@ -1094,23 +1350,15 @@ class MainWindow:
             if "process" in data:
                 self.var_process.set(bool(data.get("process")))
 
-            if "record" in data:
-                self.var_record.set(bool(data.get("record")))
-
             self._set_status(f"参数已加载：{path}")
         except Exception as exc:
             messagebox.showerror("应用失败", f"无法应用参数：{exc}")
 
     def reload_csv(self):
         try:
-            import autogui
-            import autogui.parser as parser
-
             if messagebox.askyesno("确认", "重载 CSV 需要停止所有实例，是否继续？"):
                 self.stop_all()
-                parser.csvDataDict.clear()
-                autogui.clear_script_cache()
-                autogui.clear_resource_cache()
+                clear_runtime_caches()
                 self._set_status("CSV、脚本和资源缓存已清空，后续运行将重新加载")
         except Exception as exc:
             messagebox.showerror("重载失败", f"无法重载 CSV：{exc}")
@@ -1210,7 +1458,7 @@ def main():
         return
 
     signal.signal(signal.SIGINT, signal_handler)
-    autogui.ocr.startPreload()
+    ocr.startPreload()
 
     root = tk.Tk()
     MainWindow(root)

@@ -3,8 +3,8 @@ import pyautogui
 import pydirectinput
 import numpy as np
 import cv2
-from .baseInput import BaseInput
-from .imageMatcher import locateCenterColorSensitiveOnImage
+from .base import BaseInput
+from .image_matcher import locateCenterColorSensitiveOnImage
 
 MOVE_FPS = 60
 MOVE_INTERVAL = 1/MOVE_FPS

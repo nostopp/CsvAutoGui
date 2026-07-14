@@ -7,9 +7,19 @@ import win32process
 import psutil
 import keyboard
 import mouse
-import autogui
-from autogui.config_paths import normalize_config_dir
-from autogui import log
+from autogui.execution.recovery import run_config_with_watchdog
+from autogui.execution.session import run_session_without_watchdog
+from autogui.infrastructure import log
+from autogui.infrastructure.paths import normalize_config_dir
+from autogui.infrastructure.scaling import ScaleHelper
+from autogui.input import background
+from autogui.input.background import BackGroundInput
+from autogui.input.foreground import FrontGroundInput
+from autogui.notifications.runtime import clear_thread_notifications, configure_thread_notifications
+from autogui.runtime.config import RuntimeConfigResolver
+from autogui.runtime.context import RuntimeContext
+from autogui.vision import ocr
+from autogui.vision.screenshot import ScreenshotMode
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -25,7 +35,6 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("-m", "--multi_window", action="store_true", help="后台窗口多窗口控件模式", default=False)
     parser.add_argument("--click_move_cursor", action="store_true", help="后台 click 时临时移动真实鼠标到目标点后快速恢复", default=False)
     parser.add_argument("--process", action="store_true", help="获取所有可见窗口名称", default=False)
-    parser.add_argument("--record", action="store_true", help="录制鼠标和键盘事件并导出 CSV", default=False)
     # internal flag to indicate called from GUI manager
     parser.add_argument("--_from_window", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
@@ -110,26 +119,24 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
     TITLE = args.title
     MULTI_WINDOW = args.multi_window
     CLICK_MOVE_CURSOR = args.click_move_cursor
-    RECORD = args.record
 
-    log.debug(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 截图模式: {SCREENSHOT_MODE}, 获取进程模式: {GET_PROCESS}, 录制操作模式: {RECORD}, 抓取的窗口标题: {TITLE}, 多窗口模式: {MULTI_WINDOW}, 点击瞬移鼠标模式: {CLICK_MOVE_CURSOR}")
+    log.debug(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 截图模式: {SCREENSHOT_MODE}, 获取进程模式: {GET_PROCESS}, 抓取的窗口标题: {TITLE}, 多窗口模式: {MULTI_WINDOW}, 点击瞬移鼠标模式: {CLICK_MOVE_CURSOR}")
 
     # 初始化 scale helper 等
     try:
-        scale_helper = autogui.ScaleHelper()
+        scale_helper = ScaleHelper()
         scale_helper.Init(args.scale, args.offset, args.scale_image)
-        # autogui.ScaleHelper.Instance().Init(args.scale, args.offset, args.scale_image)
     except Exception as e:
         log.error(f"ScaleHelper init 失败: {e}")
         raise ValueError(f"ScaleHelper init 失败: scale={args.scale}, offset={args.offset}, scale_image={args.scale_image}") from e
 
-    autogui.ocr.startPreload()
+    ocr.startPreload()
 
-    if autogui.backGroundInput.SAVE_SCREENSHOT:
-        autogui.backGroundInput.SAVE_SCREENSHOT_PATH = CONFIG_PATH
-    if autogui.ocr.SAVE_OCR_FILE:
-        autogui.ocr.OCR_FILE_PATH = CONFIG_PATH
-    autogui.ocr._thread_local.PRINT_LOG = PRINT_LOG
+    if background.SAVE_SCREENSHOT:
+        background.SAVE_SCREENSHOT_PATH = CONFIG_PATH
+    if ocr.SAVE_OCR_FILE:
+        ocr.OCR_FILE_PATH = CONFIG_PATH
+    ocr._thread_local.PRINT_LOG = PRINT_LOG
 
     if GET_PROCESS:
         getProcessName(log_callback)
@@ -149,55 +156,42 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
 
     try:
         if SCREENSHOT_MODE:
-            mainOperator = autogui.ScreenshotMode()
-            while not local_stop.is_set():
-                mainOperator.Update()
-        elif RECORD:
-            mainOperator = autogui.RecordMode()
+            mainOperator = ScreenshotMode()
             while not local_stop.is_set():
                 mainOperator.Update()
         else:
             if not TITLE:
-                input_obj = autogui.FrontGroundInput(PRINT_LOG)
+                input_obj = FrontGroundInput(PRINT_LOG)
             else:
-                input_obj = autogui.BackGroundInput(TITLE, MULTI_WINDOW, PRINT_LOG, CLICK_MOVE_CURSOR)
+                input_obj = BackGroundInput(TITLE, MULTI_WINDOW, PRINT_LOG, CLICK_MOVE_CURSOR)
 
-            runtime_resolver = autogui.RuntimeConfigResolver(CONFIG_PATH)
-            autogui.configure_thread_notifications(runtime_resolver.get_notification_settings())
+            runtime_resolver = RuntimeConfigResolver(CONFIG_PATH)
+            configure_thread_notifications(runtime_resolver.get_notification_settings())
+            runtime_context = RuntimeContext(
+                CONFIG_PATH,
+                scale_helper,
+                input_obj,
+                print_log=PRINT_LOG,
+                stop_event=local_stop,
+            )
 
             if runtime_resolver.should_enable_watchdog():
-                autogui.run_config_with_watchdog(
-                    CONFIG_PATH,
+                run_config_with_watchdog(
+                    runtime_context,
                     input_obj,
-                    scale_helper,
                     LOOP,
-                    PRINT_LOG,
-                    local_stop,
                     runtime_resolver=runtime_resolver,
                 )
             else:
-                subOperatorList: list[autogui.AutoOperator] = []
-                mainOperator = autogui.AutoOperator(autogui.GetCsv(CONFIG_PATH, scale_helper), CONFIG_PATH, subOperatorList, input_obj, scale_helper, LOOP, PRINT_LOG)
-
-                main_finished = False
-                while not local_stop.is_set():
-                    if len(subOperatorList) > 0:
-                        idx = len(subOperatorList) - 1
-                        if not subOperatorList[idx].Update():
-                            subOperatorList.pop(idx)
-
-                    else:
-                        if main_finished:
-                            break
-                        if not mainOperator.Update():
-                            main_finished = True
+                run_session_without_watchdog(
+                    runtime_context,
+                    loop=LOOP,
+                )
 
     except Exception as e:
         log.error(f"运行时抛出异常: {e}")
     finally:
-        if RECORD:
-            keyboard.remove_hotkey('shift+x')
-        elif SCREENSHOT_MODE:
+        if SCREENSHOT_MODE:
             keyboard.remove_hotkey('shift+x')
             keyboard.remove_hotkey('shift+c')
             keyboard.remove_hotkey('shift+f')
@@ -218,7 +212,7 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
         except Exception:
             pass
         try:
-            autogui.clear_thread_notifications()
+            clear_thread_notifications()
         except Exception:
             pass
 

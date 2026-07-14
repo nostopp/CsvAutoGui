@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
+from operation_contracts import OperationType
 
-from csv_editor.domain.enums import OperationType
 from csv_editor.domain.models import EditorDocument
 from csv_editor.io.csv_codec import parse_resource_param
 
