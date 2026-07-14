@@ -1,4 +1,4 @@
 interface:
   display_name: "CsvAutoGui 配置编写"
-  short_description: "把已确认流程落成 CsvAutoGui 配置"
-  default_prompt: "使用 $csvautogui-config-authoring 将已确认的 CsvAutoGui 流程和已采集资源落成可校验的配置文件。"
+  short_description: "澄清、创建、修改、审查并严格校验 CsvAutoGui 配置"
+  default_prompt: "使用 $csvautogui-config-authoring 澄清或审查自动化流程，并按当前仓库契约生成或修改可校验的 CsvAutoGui 配置。"
