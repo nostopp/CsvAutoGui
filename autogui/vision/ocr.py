@@ -191,8 +191,72 @@ def GetTargetCenter(points, findStr, word):
     width = int(wordLen / totalLen * np.linalg.norm(wordBox[1] - wordBox[0]))
     return int(midPoint[0]), int(midPoint[1]), width, height
 
+def _get_word_target_center(result, line_index, find_str, text):
+    """合并命中区间的文字单元框；单元内部的子串仍按局部比例估算。"""
+    words_by_line = result.get('text_word')
+    regions_by_line = result.get('text_word_region')
+    if words_by_line is None or regions_by_line is None:
+        return None
+    if line_index >= len(words_by_line) or line_index >= len(regions_by_line):
+        return None
+    words = words_by_line[line_index]
+    regions = regions_by_line[line_index]
+    if words is None or regions is None or len(words) != len(regions):
+        return None
+    if not words or any(not isinstance(word, str) or not word for word in words):
+        return None
+
+    # 保留空格、标点及重复词的位置，不能在每个单元中重新 find()。
+    words = [word.lower() for word in words]
+    if ''.join(words) != text:
+        return None
+    match_start = text.find(find_str)
+    match_end = match_start + len(find_str)
+    if match_start < 0 or not find_str:
+        return None
+
+    matched_points = []
+    offset = 0
+    estimated = False
+    for word, region in zip(words, regions):
+        end = offset + len(word)
+        start_ratio = max(match_start - offset, 0) / len(word)
+        end_ratio = min(match_end - offset, len(word)) / len(word)
+        offset = end
+        if start_ratio >= end_ratio:
+            continue
+        try:
+            box = np.asarray(region, dtype=float)
+        except (TypeError, ValueError):
+            return None
+        if box.shape != (4, 2) or not np.isfinite(box).all():
+            return None
+        if np.any(box.max(axis=0) <= box.min(axis=0)):
+            return None
+        # 英文/数字通常按组返回，只在命中的组内做比例切分。
+        top_edge = box[1] - box[0]
+        bottom_edge = box[2] - box[3]
+        matched_points.extend((
+            box[0] + top_edge * start_ratio,
+            box[0] + top_edge * end_ratio,
+            box[3] + bottom_edge * end_ratio,
+            box[3] + bottom_edge * start_ratio,
+        ))
+        estimated |= start_ratio > 0 or end_ratio < 1
+
+    if not matched_points:
+        return None
+    points = np.asarray(matched_points)
+    left, top = points.min(axis=0)
+    right, bottom = points.max(axis=0)
+    if shouldLog():
+        mode = '文字单元框（组内比例估算）' if estimated else '文字单元框'
+        log.debug(f'OCR目标定位: "{find_str}" 使用{mode}')
+    return int((left + right) / 2), int((top + bottom) / 2), int(right - left), int(bottom - top)
+
+
 def FindTextInResult(ocrResult, findStr : str, confidence: float):
-    if ocrResult is None or not ocrResult:
+    if ocrResult is None or not ocrResult or not findStr:
         return None, None, None, None
 
     result = ocrResult[0]  # 获取第一页结果
@@ -205,6 +269,11 @@ def FindTextInResult(ocrResult, findStr : str, confidence: float):
         if shouldLog():
             log.debug(f'OCR识别到文本: "{text}" 置信度: {score}, 匹配使用: {use_text}')
         if findStr in use_text and score >= confidence:
+            center = _get_word_target_center(result, i, findStr, use_text)
+            if center is not None:
+                return center
+            if shouldLog():
+                log.debug(f'OCR目标定位: "{findStr}" 文字单元框不可用，回退整行比例估算')
             return GetTargetCenter(boxes[i], findStr, use_text)
     
     return None, None, None, None
@@ -270,7 +339,18 @@ def OCR(findStr:str, input:BaseInput, findRegion=None, confidence:float = 0.8) -
     if findRegion and len(findRegion) == 4:
         findRegion = input.convertFindRegion(findRegion)
         cvImg = cvImg[findRegion[1]:findRegion[1] + findRegion[3], findRegion[0]:findRegion[0] + findRegion[2]]
-    result = _lazyOcr.getOcr().predict(cvImg)
+    engine = _lazyOcr.getOcr()
+    try:
+        result = engine.predict(cvImg, return_word_box=True)
+    except KeyError as exc:
+        # PaddleX 3.3.6 在零检测框时未初始化 text_word_region，
+        # 却在生成 text_word_boxes 时读取它。用同一截图退回普通 OCR；
+        # 不将异常直接当成“未找到”，也不永久关闭后续帧的细分框。
+        if exc.args != ('text_word_region',):
+            raise
+        if shouldLog():
+            log.debug('OCR细分框生成缺少 text_word_region，使用同一截图重试普通识别')
+        result = engine.predict(cvImg, return_word_box=False)
 
     if findStr.startswith(COMPARE_START):
         split = findStr.split(';')
