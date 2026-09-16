@@ -12,6 +12,7 @@ import keyboard
 
 from autogui.infrastructure.paths import display_config_path
 from autogui.runtime.cache import clear_runtime_caches
+from autogui.runtime.schedule import parse_run_pause_settings
 from autogui.vision import ocr
 import main as main_module
 from manager_logs import (
@@ -51,6 +52,7 @@ class InstanceEntry:
         self.stop_event = threading.Event()
         self.logs = InstanceLogBuffer(LOG_BUFFER_MAX_ENTRIES)
         self.running = False
+        self.paused = False
         self.restart_pending = False
 
 
@@ -58,8 +60,8 @@ class MainWindow:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("CsvAutoGui Manager")
-        self.root.geometry("992x718")
-        self.root.minsize(900, 620)
+        self.root.geometry("992x850")
+        self.root.minsize(992, 760)
         self.root.configure(bg=BG_COLOR)
         self._closing = False
 
@@ -408,14 +410,26 @@ class MainWindow:
         self.e_offset.grid(row=1, column=1, sticky="ew")
         Tooltip(self.e_offset, "用于点击或识别区域的额外偏移")
 
-        ttk.Separator(runtime_card).grid(row=2, column=0, columnspan=2, sticky="ew", pady=8)
+        ttk.Label(runtime_card, text="运行时长（分钟）", style="SectionValue.TLabel").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.e_run_duration = ttk.Entry(runtime_card, width=12, style="Modern.TEntry")
+        self.e_run_duration.insert(0, defaults.run_duration)
+        self.e_run_duration.grid(row=2, column=1, sticky="ew", pady=(6, 0))
+        Tooltip(self.e_run_duration, "例如 10 或 10;10（10 加 0～10 随机分钟）。需同时填写暂停时长；到期后仅在最外层 main.csv 第一条节点前暂停。")
+
+        ttk.Label(runtime_card, text="暂停时长（分钟）", style="SectionValue.TLabel").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        self.e_pause_duration = ttk.Entry(runtime_card, width=12, style="Modern.TEntry")
+        self.e_pause_duration.insert(0, defaults.pause_duration)
+        self.e_pause_duration.grid(row=3, column=1, sticky="ew", pady=(6, 0))
+        Tooltip(self.e_pause_duration, "例如 5 或 5;2（5 加 0～2 随机分钟）。每次重新随机；暂停结束后从 main.csv 第一条节点继续。")
+
+        ttk.Separator(runtime_card).grid(row=4, column=0, columnspan=2, sticky="ew", pady=8)
         self.lbl_param_hint = ttk.Label(
             runtime_card,
-            text="建议：常用配置先保存参数文件，再通过加载快速切换。",
+            text="时长格式：基础值;随机增量，两项同时填写生效。\n到期后仅在 main.csv 第一条节点前暂停。",
             style="Muted.TLabel",
             justify="left",
         )
-        self.lbl_param_hint.grid(row=3, column=0, columnspan=2, sticky="w")
+        self.lbl_param_hint.grid(row=5, column=0, columnspan=2, sticky="w")
 
         action_card = ttk.LabelFrame(sections, text="实例控制", style="Card.TLabelframe", padding=(10, 8))
         action_card.grid(row=0, column=2, sticky="nsew")
@@ -493,6 +507,7 @@ class MainWindow:
         self.treeview.bind("<B1-Motion>", self._prevent_treeview_column_resize, add=True)
         self.treeview.bind("<Double-1>", self._prevent_treeview_column_resize, add=True)
         self.treeview.tag_configure("running", background="#edf8f3")
+        self.treeview.tag_configure("paused", background="#fff6ea")
         self.treeview.tag_configure("starting", background="#eef5ff")
         self.treeview.tag_configure("stopped", background="#fbfcfe")
         self.treeview.tag_configure("restarting", background="#fff6ea")
@@ -619,6 +634,8 @@ class MainWindow:
             return override
         if inst.restart_pending:
             return "重启中"
+        if inst.running and inst.paused:
+            return "已暂停"
         return "运行中" if inst.running else "已停止"
 
     def _prevent_treeview_column_resize(self, event):
@@ -631,6 +648,8 @@ class MainWindow:
             return "starting" if status == "启动中" else "restarting"
         if status == "运行中":
             return "running"
+        if status == "已暂停":
+            return "paused"
         return "stopped"
 
     def _tree_values_for_instance(self, inst: InstanceEntry, status_override: str | None = None):
@@ -669,10 +688,11 @@ class MainWindow:
 
     def _refresh_instance_summary(self):
         total = len(self.instances)
-        running = sum(1 for inst in self.instances.values() if inst.running)
+        running = sum(1 for inst in self.instances.values() if inst.running and not inst.paused)
+        paused = sum(1 for inst in self.instances.values() if inst.running and inst.paused)
         selected = self.get_selected_instance()
         selected_text = f"当前：{selected.name}" if selected else "当前：未选择"
-        self.lbl_instance_summary.configure(text=f"总计 {total}  |  运行中 {running}  |  {selected_text}")
+        self.lbl_instance_summary.configure(text=f"总计 {total}  |  运行中 {running}  |  已暂停 {paused}  |  {selected_text}")
         if hasattr(self, "btn_clear"):
             state = tk.NORMAL if total else tk.DISABLED
             self.btn_clear.configure(state=state)
@@ -998,6 +1018,8 @@ class MainWindow:
             scale=scale,
             scale_image=self.var_scale_image.get(),
             offset=self.e_offset.get(),
+            run_duration=self.e_run_duration.get().strip(),
+            pause_duration=self.e_pause_duration.get().strip(),
             title=self.e_title.get() or None,
             multi_window=self.var_multi.get(),
             click_move_cursor=self.var_click_move_cursor.get(),
@@ -1055,7 +1077,9 @@ class MainWindow:
                 break
             inst = self.instances.get(status_event.instance_id)
             if inst is not None:
-                self._update_tree_item(inst, status_event.status)
+                inst.paused = status_event.status == "已暂停"
+                status = "重启中" if inst.restart_pending else status_event.status
+                self._update_tree_item(inst, status)
 
         drained = drain_log_events(
             self._log_queue,
@@ -1141,7 +1165,10 @@ class MainWindow:
             self._enqueue_instance_status(inst.id, "运行中")
 
             try:
-                main_module.start_instance(inst.args, log_callback=log_cb, stop_event=inst.stop_event, use_hotkey=False)
+                main_module.start_instance(
+                    inst.args, log_callback=log_cb, stop_event=inst.stop_event, use_hotkey=False,
+                    status_callback=lambda status: self._enqueue_instance_status(inst.id, status),
+                )
             except Exception as exc:
                 log_cb(f"实例异常结束: {exc}\n")
             finally:
@@ -1157,6 +1184,11 @@ class MainWindow:
         self._start_instance_with_args(args)
 
     def _start_instance_with_args(self, args):
+        try:
+            parse_run_pause_settings(getattr(args, "run_duration", ""), getattr(args, "pause_duration", ""))
+        except ValueError as exc:
+            messagebox.showerror("运行参数错误", str(exc))
+            return
         name = args.config
         iid = self.next_id
         self.next_id += 1
@@ -1284,6 +1316,8 @@ class MainWindow:
             "scale": args.scale,
             "scale_image": args.scale_image,
             "offset": args.offset,
+            "run_duration": args.run_duration,
+            "pause_duration": args.pause_duration,
             "title": args.title,
             "multi_window": args.multi_window,
             "click_move_cursor": args.click_move_cursor,
@@ -1312,6 +1346,10 @@ class MainWindow:
             return
 
         try:
+            # Loading older parameter files must clear any schedule left in the form.
+            for entry, key in ((self.e_run_duration, "run_duration"), (self.e_pause_duration, "pause_duration")):
+                entry.delete(0, tk.END)
+                entry.insert(0, str(data.get(key) or ""))
             if "config" in data:
                 self.e_config.delete(0, tk.END)
                 self.e_config.insert(0, self._normalize_config_path(str(data.get("config", ""))))

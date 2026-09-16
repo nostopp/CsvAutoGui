@@ -28,6 +28,8 @@ class AutoOperator:
         runtime_context: RuntimeContext,
         sub_operator_list: list["AutoOperator"],
         loop: bool = False,
+        *,
+        is_main_flow: bool = False,
     ) -> None:
         if not isinstance(compiled_flow, CompiledFlow):
             raise TypeError("compiled_flow 必须是 CompiledFlow")
@@ -43,6 +45,7 @@ class AutoOperator:
         self._sub_operator_list = sub_operator_list
         self._input = runtime_context.input
         self._loop = loop
+        self._is_main_flow = is_main_flow
         self._print_log = runtime_context.print_log
         self._source_file = compiled_flow.file_name
         self._jump_marks = dict(compiled_flow.jump_marks)
@@ -140,6 +143,11 @@ class AutoOperator:
     def Update(self) -> bool:
         if len(self._operations_by_index) <= 0:
             return False
+
+        schedule = self._runtime_context.run_pause_schedule
+        if self._is_main_flow and self._cursor == 0 and schedule is not None:
+            if not schedule.before_main_entry(self._runtime_context.stop_event):
+                return False
 
         operation = self._operations[self._cursor]
 

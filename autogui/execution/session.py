@@ -35,11 +35,13 @@ class FlowRuntimeSession:
     ) -> None:
         self.runtime_context = runtime_context
         self.sub_operator_list: list[AutoOperator] = []
+        compiled_flow = runtime_context.get_compiled_flow(source_file)
         self.main_operator = AutoOperator(
-            runtime_context.get_compiled_flow(source_file),
+            compiled_flow,
             runtime_context,
             self.sub_operator_list,
             loop,
+            is_main_flow=compiled_flow.file_name.casefold() == "main.csv",
         )
         self.main_finished = False
 
@@ -99,6 +101,8 @@ def run_session_without_watchdog(
             return SessionRunResult(SessionStatus.FINISHED, last_step)
         last_step = step
         has_more = session.step()
+        if stop_event.is_set():
+            return SessionRunResult(SessionStatus.STOPPED, step)
         if not has_more and not session.sub_operator_list:
             return SessionRunResult(SessionStatus.FINISHED, step)
     return SessionRunResult(SessionStatus.STOPPED, last_step)

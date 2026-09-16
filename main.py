@@ -18,6 +18,7 @@ from autogui.input.foreground import FrontGroundInput
 from autogui.notifications.runtime import clear_thread_notifications, configure_thread_notifications
 from autogui.runtime.config import RuntimeConfigResolver
 from autogui.runtime.context import RuntimeContext
+from autogui.runtime.schedule import RunPauseSchedule, parse_run_pause_settings
 from autogui.vision import ocr
 from autogui.vision.screenshot import ScreenshotMode
 
@@ -31,13 +32,20 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--scale", help="与配置所用分辨率的缩放值", default=1.0, type=float)
     parser.add_argument("--scale_image", action="store_true", help="缩放时是否缩放用到的截图", default=False)
     parser.add_argument("--offset", help="搜索时需要的偏移值", default="0;0", type=str)
+    parser.add_argument("--run_duration", help="运行时长（分钟）：基础值[;随机增量]，需同时设置 --pause_duration", default="", type=str)
+    parser.add_argument("--pause_duration", help="暂停时长（分钟）：基础值[;随机增量]，仅在 main.csv 第一条节点前暂停", default="", type=str)
     parser.add_argument("-t", "--title", help="目标窗口名称,指定后程序运行在后台窗口模式", default=None, type=str)
     parser.add_argument("-m", "--multi_window", action="store_true", help="后台窗口多窗口控件模式", default=False)
     parser.add_argument("--click_move_cursor", action="store_true", help="后台 click 时临时移动真实鼠标到目标点后快速恢复", default=False)
     parser.add_argument("--process", action="store_true", help="获取所有可见窗口名称", default=False)
     # internal flag to indicate called from GUI manager
     parser.add_argument("--_from_window", action="store_true", help=argparse.SUPPRESS)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    try:
+        parse_run_pause_settings(args.run_duration, args.pause_duration)
+    except ValueError as exc:
+        parser.error(str(exc))
+    return args
 
 
 def getProcessName(log=print):
@@ -89,15 +97,19 @@ def getProcessName(log=print):
     log(f"当前鼠标位置 HWND: {cur_hwnd}, PID: {pid}, CLASS: {class_name}, 进程: {process_name}, 标题: '{title}'")
 
 
-def start_instance(args: argparse.Namespace, log_callback=print, stop_event: threading.Event = None, use_hotkey: bool = True):
+def start_instance(args: argparse.Namespace, log_callback=print, stop_event: threading.Event = None, use_hotkey: bool = True, status_callback=None):
     """
     在当前进程中启动一个 main 实例（多实例支持），不使用全局 KEEP_RUN。
     - args: argparse.Namespace（与 parse_args 返回格式一致）
     - log_callback: 可调用对象，接收字符串，用于显示日志
     - stop_event: threading.Event，用来停止运行；如果 None，会创建一个本地事件并在 hotkey 时设置
     - use_hotkey: 是否注册 Shift+Ctrl+X 退出（仅用于命令行启动）
+    - status_callback: 计划暂停/恢复状态回调；Manager 通过队列消费，不可在这里调用 Tk
     """
     config_name = os.fspath(normalize_config_dir(Path(args.config)))
+    run_duration = getattr(args, "run_duration", "")
+    pause_duration = getattr(args, "pause_duration", "")
+    schedule_settings = parse_run_pause_settings(run_duration, pause_duration)
 
     try:
         # 将当前实例名（config 路径）放入线程上下文，方便日志带上来源
@@ -119,6 +131,9 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
     TITLE = args.title
     MULTI_WINDOW = args.multi_window
     CLICK_MOVE_CURSOR = args.click_move_cursor
+
+    if bool((run_duration or "").strip()) != bool((pause_duration or "").strip()):
+        log.warning("运行时长和暂停时长需要同时配置，计划暂停未启用")
 
     log.debug(f"工作路径: {CONFIG_PATH}, 是否循环: {LOOP}, 是否打印日志: {PRINT_LOG}, 截图模式: {SCREENSHOT_MODE}, 获取进程模式: {GET_PROCESS}, 抓取的窗口标题: {TITLE}, 多窗口模式: {MULTI_WINDOW}, 点击瞬移鼠标模式: {CLICK_MOVE_CURSOR}")
 
@@ -173,6 +188,10 @@ def start_instance(args: argparse.Namespace, log_callback=print, stop_event: thr
                 input_obj,
                 print_log=PRINT_LOG,
                 stop_event=local_stop,
+                run_pause_schedule=(
+                    RunPauseSchedule(schedule_settings, status_callback=status_callback)
+                    if schedule_settings is not None else None
+                ),
             )
 
             if runtime_resolver.should_enable_watchdog():

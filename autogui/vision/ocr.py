@@ -90,9 +90,9 @@ class LazyPaddleOCR:
     def _resolve_model_settings():
         import paddle
 
-        use_gpu = paddle.is_compiled_with_cuda()
-        if use_gpu:
-            return "PP-OCRv5_server_det", "PP-OCRv5_server_rec"
+        # use_gpu = paddle.is_compiled_with_cuda()
+        # if use_gpu:
+        #     return "PP-OCRv5_server_det", "PP-OCRv5_server_rec"
         
         return "PP-OCRv5_mobile_det", "PP-OCRv5_mobile_rec"
 

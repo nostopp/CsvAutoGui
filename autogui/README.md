@@ -12,7 +12,7 @@
 | `flow/` | CSV 原始模型、缓存、加载和强类型编译 | `models.py`、`loader.py` |
 | `scripting/` | `script` 节点和 `*_resource.csv` | `runtime.py`、`resources.py` |
 | `notifications/` | 本地弹窗和远程通知策略 | `notifier.py`、`runtime.py` |
-| `runtime/` | 实例状态、层级配置和缓存协调 | `context.py`、`config.py`、`cache.py` |
+| `runtime/` | 实例状态、层级配置、计划暂停和缓存协调 | `context.py`、`config.py`、`schedule.py`、`cache.py` |
 | `execution/` | 节点解释、会话、watchdog 和 recovery | `operator.py`、`session.py`、`watchdog.py`、`recovery.py` |
 
 ## 依赖方向

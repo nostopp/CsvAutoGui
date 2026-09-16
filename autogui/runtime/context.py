@@ -11,6 +11,7 @@ from ..flow.models import CompiledFlow
 from ..infrastructure.paths import logical_abs_path, resolve_config_relative_path
 from ..infrastructure.scaling import ScaleHelper
 from ..input.base import BaseInput
+from .schedule import RunPauseSchedule
 
 
 @dataclass(slots=True)
@@ -24,6 +25,7 @@ class RuntimeContext:
     compiled_flows: dict[str, CompiledFlow] = field(default_factory=dict)
     image_cache: dict[str, Any] = field(default_factory=dict)
     resource_cache: dict[str, Any] = field(default_factory=dict)
+    run_pause_schedule: RunPauseSchedule | None = None
     _cache_lock: RLock = field(default_factory=RLock, init=False, repr=False)
 
     def __post_init__(self) -> None:

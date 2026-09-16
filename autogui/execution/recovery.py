@@ -49,6 +49,8 @@ def _run_session_until_boundary(
 
         watchdog.begin_step()
         has_more = session.step()
+        if stop_event.is_set():
+            return SessionRunResult(SessionStatus.STOPPED, step)
         if not watchdog.current_step_had_progress and step.operate in NON_PROGRESS_OPERATIONS:
             watchdog.record_observation(step.operate, source="node")
 
@@ -99,6 +101,7 @@ def create_main_session(
     watchdog = ExecutionWatchdog(
         watchdog_settings.stall_timeout_seconds,
         watchdog_settings.stall_non_progress_ops,
+        time_fn=runtime_context.run_pause_schedule.active_time if runtime_context.run_pause_schedule else None,
     )
     observed_input = ObservedInput(real_input, watchdog)
     runtime_context.set_input(observed_input)
@@ -122,6 +125,7 @@ def run_recovery_flow(
     watchdog = ExecutionWatchdog(
         thresholds.stall_timeout_seconds,
         thresholds.stall_non_progress_ops,
+        time_fn=runtime_context.run_pause_schedule.active_time if runtime_context.run_pause_schedule else None,
     )
     observed_input = ObservedInput(real_input, watchdog)
     previous_input = runtime_context.input
