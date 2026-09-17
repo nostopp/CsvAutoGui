@@ -344,13 +344,13 @@ def OCR(findStr:str, input:BaseInput, findRegion=None, confidence:float = 0.8) -
         result = engine.predict(cvImg, return_word_box=True)
     except KeyError as exc:
         # PaddleX 3.3.6 在零检测框时未初始化 text_word_region，
-        # 却在生成 text_word_boxes 时读取它。用同一截图退回普通 OCR；
-        # 不将异常直接当成“未找到”，也不永久关闭后续帧的细分框。
+        # 却在生成 text_word_boxes 时读取它。该版本此路径表示未检测到
+        # 文字，直接返回未命中，无需重复推理；后续帧仍启用细分框。
         if exc.args != ('text_word_region',):
             raise
         if shouldLog():
-            log.debug('OCR细分框生成缺少 text_word_region，使用同一截图重试普通识别')
-        result = engine.predict(cvImg, return_word_box=False)
+            log.debug('OCR未检测到文字，跳过细分框结果查找')
+        return None, None, None, None
 
     if findStr.startswith(COMPARE_START):
         split = findStr.split(';')
