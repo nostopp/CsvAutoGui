@@ -67,6 +67,18 @@
 
 脚本应通过传入的 `ctx` 使用 `find_image`、`find_text`、`start_subflow`、`get_resource`、`state` 和输入对象，不直接调用框架内部调度入口。
 
+### 脚本故障处理
+
+配置脚本主动判定的加载超时、异常业务状态等运行故障，必须记录错误日志并进入等待底层处理的故障状态；不得通过向脚本入口外抛出 `TimeoutError`、`ValueError` 等异常中断实例，绕过 watchdog 的 stall 截图、recovery 和终态通知链路。
+
+- 首次故障记录原因、所在阶段；捕获执行期间的普通异常时同时记录堆栈。将故障状态保存在本实例 `ctx.state` 的脚本专属键下，后续不重复打印同一错误。
+- 故障后停止识别和业务输入，不点击、不启动子流程，不清空业务状态或假装正常完成。不要在脚本内部无限循环或长时间 sleep。
+- 每次调用记录观察，例如 `ctx.input.record_observation("script_fault", source="script_ctx")`，再用 `(1.0, lambda index: index, None)` 短等待并返回当前节点。这样非有效操作次数继续累计，无进展时间不重置，运行时可在各次调用之间处理停止和 watchdog。
+- 需要兜底时在 `run(ctx)` 边界捕获普通 `Exception`，转入上述故障状态；不捕获 `BaseException`，不得吞掉 `KeyboardInterrupt`、`SystemExit` 等控制信号。
+- 生成前核对层级合并后的 watchdog 确实启用，以及 recovery/终态通知符合需求。watchdog 关闭时，上述等待不会自动触发卡死处理，不能声称已有底层兜底；应明确解决运行策略，不能擅自改为抛异常或绕过框架直接发送通知。
+
+此规则约束配置运行脚本的故障上报；不要求校验工具或框架内部的参数检查吞掉异常。
+
 ## 运行时资源
 
 运行时 `*_resource.csv` 只允许：

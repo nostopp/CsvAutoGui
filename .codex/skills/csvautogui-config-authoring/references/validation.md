@@ -57,6 +57,8 @@ uv run --no-sync python .codex/skills/csvautogui-config-authoring/scripts/valida
 - 不使用 `autogui.script_runtime`、`autogui.flow.parser`、`GetCsv` 或 `csvDataDict`。
 - 不直接构造 `ScriptContext`，不直接调用 `execute_script_node()`。
 - script 文件后缀严格使用小写 `.py`，显式资源文件后缀严格使用小写 `_resource.csv`，与当前运行时大小写规则一致。
+- 按 [脚本故障处理](core.md#脚本故障处理) 检查主动超时/错误和异常兜底路径：日志后锁定故障状态、短等待返回当前节点，不向入口外抛错、不再产生业务输入；持续累计观察且不重置 watchdog 进展，保留停止处理。
+- 涉及故障处理改动时模拟至少一条故障路径，验证错误不会绕过底层卡死链路，并核对有效 watchdog 配置；不得把静态检查或模拟触发描述为远程通知已实发成功。
 - 脚本把 `ctx.node` 当作只读快照，不依赖修改它改变已编译流程。
 
 ## runtime.json

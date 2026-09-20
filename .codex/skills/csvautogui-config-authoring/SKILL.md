@@ -55,6 +55,8 @@ description: 澄清、创建、扩展、重构或审查当前仓库中的 CsvAut
 
 只写用户选定的目标 config。保持改动最小，列出创建、修改和建议清理的文件；不要把其他 config 的旧导入或运行时结构复制进目标配置。
 
+配置脚本主动报告运行故障时，使用“记录错误日志 → 停止业务操作 → 让出执行权等待底层 watchdog 处理”，不得直接抛异常打断实例并绕过卡死通知链路。具体实现约束见 [core.md 的脚本故障处理](references/core.md#脚本故障处理)。
+
 ### 5. 校验最终输出
 
 运行 [scripts/validate_config.py](scripts/validate_config.py)，再按 [references/validation.md](references/validation.md) 做任务特定复核。任何错误或警告都必须解决或明确报告，不能用“看起来正确”代替执行结果。
