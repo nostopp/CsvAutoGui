@@ -16,6 +16,7 @@ from csv_editor.domain.models import (
 )
 from csv_editor.domain.node_patch import NodePatch, apply_node_patch as apply_patch_to_node
 from csv_editor.io.csv_codec import CsvEditorCodec
+from csv_editor.services.config_creation import ConfigCreationPlan, create_config
 from csv_editor.services.validation import (
     validate_document as validate_editor_document,
     validate_flow as validate_editor_flow,
@@ -111,6 +112,9 @@ class EditorDocumentController:
         if self._document is None:
             raise RuntimeError("尚未打开编辑器文档")
         return self.open_document(self._document.root_path)
+
+    def create_config(self, plan: ConfigCreationPlan) -> Path:
+        return create_config(plan, self.codec)
 
     def save_document(self) -> None:
         if self._document is None:

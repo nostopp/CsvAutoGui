@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autogui.infrastructure.paths import normalize_config_dir
+from autogui.infrastructure.paths import default_config_root, normalize_config_dir
 from autogui.runtime.cache import clear_runtime_caches
 from operation_contracts import (
     OperationType,
@@ -43,6 +43,7 @@ from operation_contracts import (
     require_operation_contract,
 )
 from csv_editor.adapters import RuntimeOcrPreviewAdapter
+from csv_editor.config_creation_dialog import ConfigCreationDialog
 from csv_editor.controllers.change_set import ChangeImpact, EditorChangeSet
 from csv_editor.controllers.document_controller import EditorDocumentController
 from csv_editor.domain.enums import BranchMode, BranchTrigger, ValidationSeverity
@@ -178,6 +179,7 @@ class EditorMainWindow(QMainWindow):
         self._update_actions_enabled(False)
 
     def _build_actions(self) -> None:
+        self.create_config_action = QAction("创建配置…", self)
         self.open_action = QAction("打开配置目录", self)
         self.save_action = QAction("保存 CSV", self)
         self.reload_action = QAction("重新加载", self)
@@ -201,6 +203,7 @@ class EditorMainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         menu = self.menuBar().addMenu("文件")
+        menu.addAction(self.create_config_action)
         menu.addAction(self.open_action)
         menu.addAction(self.save_action)
         menu.addAction(self.reload_action)
@@ -306,6 +309,7 @@ class EditorMainWindow(QMainWindow):
         self.statusBar().showMessage("请选择配置目录")
 
     def _connect_signals(self) -> None:
+        self.create_config_action.triggered.connect(self.create_config)
         self.open_action.triggered.connect(self.choose_config_folder)
         self.save_action.triggered.connect(self.save_document)
         self.reload_action.triggered.connect(self.reload_document)
@@ -329,6 +333,37 @@ class EditorMainWindow(QMainWindow):
         self.inspector.image_preview_requested.connect(self._open_image_preview)
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.undo_stack.indexChanged.connect(self._on_undo_stack_index_changed)
+
+    def create_config(self) -> None:
+        parent_directory = self.document.root_path.parent if self.document else default_config_root()
+        dialog = ConfigCreationDialog(
+            parent_directory, self.controller.create_config, self._prepare_config_switch, self,
+        )
+        if dialog.exec() != QDialog.Accepted or dialog.created_path is None:
+            return
+        try:
+            self.open_config_folder(dialog.created_path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "打开失败", f"配置已创建于 {dialog.created_path}，但打开失败：{exc}")
+            return
+        self.statusBar().showMessage(f"已创建并打开: {dialog.created_path}")
+
+    def _prepare_config_switch(self) -> bool:
+        if not self.document or self.undo_stack.isClean():
+            return True
+        choice = QMessageBox.question(
+            self, "未保存修改", "当前配置有未保存修改，创建并打开新配置前是否保存？",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel,
+        )
+        if choice == QMessageBox.Cancel:
+            return False
+        if choice == QMessageBox.Save:
+            try:
+                self.save_document()
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, "保存失败", str(exc))
+                return False
+        return True
 
     def choose_config_folder(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "选择配置目录")
@@ -1283,6 +1318,7 @@ class EditorMainWindow(QMainWindow):
 
     def _configure_action_hints(self) -> None:
         hint_map = [
+            (self.create_config_action, "创建空白配置，可使用默认参数或复用已有参数 JSON"),
             (self.open_action, "打开配置目录"),
             (self.save_action, "保存当前 CSV"),
             (self.reload_action, "重新加载当前配置目录（包括脚本和资源文件缓存）"),

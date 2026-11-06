@@ -22,6 +22,7 @@ COPY_FILES = [
     "main.py",
     "mainWindow.py",
     "csv_schema.py",
+    "run_parameters.py",
     "pyproject.toml",
     "pyproject_cpu.toml",
     "pyproject_gpu.toml",

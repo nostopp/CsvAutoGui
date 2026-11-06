@@ -15,6 +15,7 @@ from autogui.runtime.cache import clear_runtime_caches
 from autogui.runtime.schedule import parse_run_pause_settings
 from autogui.vision import ocr
 import main as main_module
+from run_parameters import default_run_parameters, export_run_parameters
 from manager_logs import (
     InstanceLogBuffer,
     InstanceStatusEvent,
@@ -70,7 +71,7 @@ class MainWindow:
         self._tree_font = tkfont.nametofont("TkDefaultFont")
         self._tree_heading_font = tkfont.Font(family="Segoe UI", size=9, weight="bold")
 
-        defaults = main_module.parse_args([])
+        defaults = argparse.Namespace(**default_run_parameters())
         self.instances: dict[int, InstanceEntry] = {}
         self.next_id = 1
         self._log_queue: queue.SimpleQueue[LogEvent] = queue.SimpleQueue()
@@ -1308,21 +1309,7 @@ class MainWindow:
 
     def save_params(self):
         args = self.build_args()
-        data = {
-            "config": args.config,
-            "loop": args.loop,
-            "log": args.log,
-            "screenshots": args.screenshots,
-            "scale": args.scale,
-            "scale_image": args.scale_image,
-            "offset": args.offset,
-            "run_duration": args.run_duration,
-            "pause_duration": args.pause_duration,
-            "title": args.title,
-            "multi_window": args.multi_window,
-            "click_move_cursor": args.click_move_cursor,
-            "process": args.process,
-        }
+        data = export_run_parameters(args)
 
         path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")], title="保存参数为 JSON")
         if not path:
